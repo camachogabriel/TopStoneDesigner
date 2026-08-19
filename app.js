@@ -18,6 +18,9 @@ const PRODUCT_TYPES = [
   { value: "run_shirt", label: "Run Shirt" },
 ];
 
+const SIZE_OPTIONS = ["2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL"];
+const GENDER_OPTIONS = ["Hombre", "Mujer", "Unisex"];
+
 let fabrics = [];       // cache: [{...fabric, images:[url,...]}]
 let clients = [];
 let products = [];      // [{...product, client_name, zone_count, file_count}]
@@ -422,18 +425,21 @@ async function deleteClient(id) {
 // PRODUCTS
 // =====================================================================
 async function loadProducts() {
-  $("#product-rows").innerHTML = '<tr><td colspan="8" class="empty">Cargando productos…</td></tr>';
+  $("#product-rows").innerHTML = '<tr><td colspan="9" class="empty">Cargando productos…</td></tr>';
   const { data, error } = await sb.from("topstone_products").select("*").order("created_at", { ascending: false });
   if (error) { toast("Error cargando productos: " + error.message, true); return; }
   const { data: zones } = await sb.from("topstone_product_fabric_zones").select("product_id");
+  const { data: sizes } = await sb.from("topstone_product_sizes").select("product_id, quantity");
   const { data: files } = await sb.from("topstone_product_files").select("product_id");
-  const zoneCounts = {}, fileCounts = {};
+  const zoneCounts = {}, sizeCounts = {}, fileCounts = {};
   (zones || []).forEach(z => zoneCounts[z.product_id] = (zoneCounts[z.product_id] || 0) + 1);
+  (sizes || []).forEach(s => sizeCounts[s.product_id] = (sizeCounts[s.product_id] || 0) + (s.quantity || 0));
   (files || []).forEach(f => fileCounts[f.product_id] = (fileCounts[f.product_id] || 0) + 1);
   products = (data || []).map(p => ({
     ...p,
     client_name: (clients.find(c => c.id === p.client_id) || {}).name || "",
     zone_count: zoneCounts[p.id] || 0,
+    size_qty: sizeCounts[p.id] || 0,
     file_count: fileCounts[p.id] || 0,
   }));
   renderProductTypeSelect();
@@ -457,7 +463,7 @@ function renderProducts() {
     return true;
   });
   const body = $("#product-rows");
-  if (!rows.length) { body.innerHTML = '<tr><td colspan="8" class="empty">No hay productos todavía. Crea el primero con "+ Crear producto".</td></tr>'; return; }
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="9" class="empty">No hay productos todavía. Crea el primero con "+ Crear producto".</td></tr>'; return; }
   const typeLabel = v => (PRODUCT_TYPES.find(t => t.value === v) || {}).label || v;
   body.innerHTML = rows.map(p => `
     <tr style="cursor:pointer" onclick="openProductDetail('${p.id}')">
@@ -466,6 +472,7 @@ function renderProducts() {
       <td><span class="badge mid">${esc(typeLabel(p.product_type))}</span></td>
       <td>${esc(p.client_name || "—")}</td>
       <td>${p.zone_count}</td>
+      <td>${p.size_qty}</td>
       <td>${p.file_count}</td>
       <td class="small">${fmtDate(p.created_at)}</td>
       <td onclick="event.stopPropagation()">
@@ -476,12 +483,14 @@ function renderProducts() {
 }
 
 let productZoneRows = [];   // [{fabric_id, code, name, zone_name, notes}]
+let productSizeRows = [];   // [{size, quantity, gender, note}]
 let productFiles = [];      // existing: [{id,file_url,file_name,file_type}]
 let productNewFiles = [];   // File objects staged
 
 function openProductForm(id) {
   const p = id ? products.find(x => x.id === id) : null;
   productZoneRows = [];
+  productSizeRows = [];
   productNewFiles = [];
   productFiles = [];
   $("#modal-product-form-body").innerHTML = `
@@ -509,6 +518,10 @@ function openProductForm(id) {
     <div class="pfz-list" id="pf-zones"></div>
     <button type="button" class="btn small" onclick="addZoneRow()">+ Agregar zona</button>
 
+    <label style="margin-top:18px">Tallas</label>
+    <div id="pf-sizes"></div>
+    <button type="button" class="btn small" onclick="addSizeRow()">+ Agregar talla</button>
+
     <label style="margin-top:18px">Recursos (fotos, PDF, PSD, etc.)</label>
     <div id="pf-files-existing"></div>
     <input type="file" id="pf-file-input" multiple onchange="stageProductFiles(this.files)">
@@ -524,19 +537,25 @@ function openProductForm(id) {
   $("#modal-product-form").classList.add("show");
 
   if (id) {
-    // load existing zones + files async
+    // load existing zones + sizes + files async
     (async () => {
       const { data: zdata } = await sb.from("topstone_product_fabric_zones").select("*").eq("product_id", id).order("sort_order");
       productZoneRows = (zdata || []).map(z => ({
         fabric_id: z.fabric_id, code: z.fabric_code_snapshot, zone_name: z.zone_name, notes: z.notes || ""
       }));
+      const { data: sdata } = await sb.from("topstone_product_sizes").select("*").eq("product_id", id).order("sort_order");
+      productSizeRows = (sdata || []).map(s => ({
+        size: s.size, quantity: s.quantity, gender: s.gender || "", note: s.note || ""
+      }));
       const { data: fdata } = await sb.from("topstone_product_files").select("*").eq("product_id", id);
       productFiles = fdata || [];
       renderZoneRows();
+      renderSizeRows();
       renderExistingFiles();
     })();
   } else {
     addZoneRow();
+    addSizeRow();
   }
 }
 function quickAddClient() {
@@ -575,6 +594,32 @@ function addZoneRow() {
   renderZoneRows();
 }
 function removeZoneRow(i) { productZoneRows.splice(i, 1); renderZoneRows(); }
+function renderSizeRows() {
+  $("#pf-sizes").innerHTML = productSizeRows.map((s, i) => `
+    <div class="size-row">
+      <div><label style="margin:0 0 3px">Talla</label>
+        <select onchange="productSizeRows[${i}].size=this.value">
+          ${SIZE_OPTIONS.map(sz => `<option value="${sz}" ${s.size === sz ? "selected" : ""}>${sz}</option>`).join("")}
+        </select>
+      </div>
+      <div><label style="margin:0 0 3px">Cantidad</label>
+        <input type="number" min="1" step="1" value="${s.quantity ?? 1}" oninput="productSizeRows[${i}].quantity=parseInt(this.value)||1">
+      </div>
+      <div><label style="margin:0 0 3px">Género</label>
+        <select onchange="productSizeRows[${i}].gender=this.value">
+          <option value="">— sin indicar —</option>
+          ${GENDER_OPTIONS.map(g => `<option value="${g}" ${s.gender === g ? "selected" : ""}>${g}</option>`).join("")}
+        </select>
+      </div>
+      <div><label style="margin:0 0 3px">Nota</label><input value="${esc(s.note || "")}" placeholder="Ej: corte ajustado" oninput="productSizeRows[${i}].note=this.value"></div>
+      <button type="button" class="btn danger small" onclick="removeSizeRow(${i})">×</button>
+    </div>`).join("") || '<div class="small">Sin tallas agregadas.</div>';
+}
+function addSizeRow() {
+  productSizeRows.push({ size: SIZE_OPTIONS[0], quantity: 1, gender: "", note: "" });
+  renderSizeRows();
+}
+function removeSizeRow(i) { productSizeRows.splice(i, 1); renderSizeRows(); }
 function fabricAutocomplete(input, i) {
   const q = input.value.toLowerCase();
   const list = $("#ac-list-" + i);
@@ -647,6 +692,15 @@ async function saveProduct(id) {
         zone_name: z.zone_name.trim(), notes: z.notes.trim(), sort_order: i,
       })));
     }
+    // sizes: clear + reinsert
+    const validSizes = productSizeRows.filter(s => s.size && s.quantity > 0);
+    await sb.from("topstone_product_sizes").delete().eq("product_id", productId);
+    if (validSizes.length) {
+      await sb.from("topstone_product_sizes").insert(validSizes.map((s, i) => ({
+        product_id: productId, size: s.size, quantity: s.quantity, gender: s.gender || "",
+        note: (s.note || "").trim(), sort_order: i,
+      })));
+    }
     // files: existing removals already applied immediately via removeExistingProductFile();
     // here we only need to upload newly staged files.
     for (const file of productNewFiles) {
@@ -669,6 +723,7 @@ async function openProductDetail(id) {
   const p = products.find(x => x.id === id);
   if (!p) return;
   const { data: zdata } = await sb.from("topstone_product_fabric_zones").select("*").eq("product_id", id).order("sort_order");
+  const { data: sdata } = await sb.from("topstone_product_sizes").select("*").eq("product_id", id).order("sort_order");
   const { data: fdata } = await sb.from("topstone_product_files").select("*").eq("product_id", id);
   const typeLabel = (PRODUCT_TYPES.find(t => t.value === p.product_type) || {}).label || p.product_type;
   $("#modal-product-detail-body").innerHTML = `
@@ -689,6 +744,15 @@ async function openProductDetail(id) {
           <div style="flex:1"><b>${esc(z.fabric_code_snapshot)}</b> ${f ? "— " + esc(f.name) : ""}${z.notes ? `<div class="small">${esc(z.notes)}</div>` : ""}</div>
         </div>`;
       }).join("") || '<div class="small">Sin zonas asignadas.</div>'}
+    </div>
+    <label>Tallas</label>
+    <div class="table-wrap" style="margin-bottom:10px">
+      <table>
+        <thead><tr><th>Talla</th><th>Cantidad</th><th>Género</th><th>Nota</th></tr></thead>
+        <tbody>
+          ${(sdata || []).length ? (sdata || []).map(s => `<tr><td><b>${esc(s.size)}</b></td><td>${s.quantity}</td><td>${esc(s.gender || "—")}</td><td class="small">${esc(s.note || "—")}</td></tr>`).join("") : '<tr><td colspan="4" class="empty">Sin tallas asignadas.</td></tr>'}
+        </tbody>
+      </table>
     </div>
     <label>Archivos</label>
     <div>${(fdata || []).map(f => `<span class="filepill">${fileIcon(f.file_type)} <a href="${esc(f.file_url)}" target="_blank">${esc(f.file_name)}</a></span>`).join("") || '<div class="small">Sin archivos.</div>'}</div>

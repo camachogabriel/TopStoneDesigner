@@ -79,6 +79,7 @@ tr:hover td{background:var(--panel2)}
 .formgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
 .formgrid .full{grid-column:1/-1}
 .zone-row{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
+.size-row{display:grid;grid-template-columns:.9fr .7fr 1fr 1.6fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
 .filepill{display:inline-flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line2);padding:6px 10px;border-radius:8px;margin:4px 6px 0 0;font-size:12px}
 .filepill button{background:none;border:none;color:var(--bad);cursor:pointer;font-weight:900}
 .empty{padding:40px;text-align:center;color:var(--muted)}
@@ -100,7 +101,7 @@ tr:hover td{background:var(--panel2)}
 .ac-item{padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--line)}
 .ac-item:hover{background:var(--panel)}
 footer.note{color:var(--muted);font-size:11px;margin-top:20px}
-@media(max-width:900px){.app{flex-direction:column}.sidebar{width:100%;height:auto;position:relative;display:flex;gap:8px;overflow:auto}.brand,.brand-sub{display:none}.formgrid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}}
+@media(max-width:900px){.app{flex-direction:column}.sidebar{width:100%;height:auto;position:relative;display:flex;gap:8px;overflow:auto}.brand,.brand-sub{display:none}.formgrid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.size-row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -152,8 +153,8 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Cliente</th><th>Zonas</th><th>Archivos</th><th>Fecha</th><th></th></tr></thead>
-          <tbody id="product-rows"><tr><td colspan="8" class="empty">Cargando productos…</td></tr></tbody>
+          <thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Cliente</th><th>Zonas</th><th>Tallas</th><th>Archivos</th><th>Fecha</th><th></th></tr></thead>
+          <tbody id="product-rows"><tr><td colspan="9" class="empty">Cargando productos…</td></tr></tbody>
         </table>
       </div>
     </div>
