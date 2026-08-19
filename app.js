@@ -295,11 +295,17 @@ async function saveFabric(id) {
       await removeStorageObject(BUCKET_FABRICS, url);
     }
     // upload new images
-    let sortBase = Date.now();
+    // NOTE: sort_order is a plain "integer" column (max ~2.1 billion) — it must stay a small
+    // sequential index, NOT a millisecond timestamp (Date.now() overflows it and Postgres
+    // rejects the insert with "value out of range for type integer", 22003). The upload path
+    // filename can safely use Date.now() for uniqueness since that's just text.
+    const existingCount = id ? ((fabrics.find(x => x.id === id) || {}).images || []).length : 0;
+    let sortIndex = Math.max(0, existingCount - pendingFabricRemovals.length);
     for (const file of pendingFabricImages) {
-      const path = `${code}/${sortBase}_${slugFile(file.name)}`;
+      const path = `${code}/${Date.now()}_${slugFile(file.name)}`;
       const url = await uploadFile(BUCKET_FABRICS, path, file);
-      await sb.from("topstone_fabric_images").insert({ fabric_id: fabricId, url, sort_order: sortBase++ });
+      const { error: imgErr } = await sb.from("topstone_fabric_images").insert({ fabric_id: fabricId, url, sort_order: sortIndex++ });
+      if (imgErr) throw imgErr;
     }
     toast("Tela guardada ✓");
     closeAllModals();
