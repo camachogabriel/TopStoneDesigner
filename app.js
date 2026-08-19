@@ -196,12 +196,13 @@ function openFabricDetail(id) {
 
 let pendingFabricImages = []; // File objects staged for upload on save
 let pendingFabricRemovals = []; // urls to remove on save
+let fabricExistingOrder = []; // ordered urls of currently-kept existing images (index 0 = principal)
 
 function openFabricForm(id) {
   const f = id ? fabrics.find(x => x.id === id) : null;
   pendingFabricImages = [];
   pendingFabricRemovals = [];
-  const existingImgs = f ? f.images.slice() : [];
+  fabricExistingOrder = f ? f.images.slice() : [];
   $("#modal-fabric-form-body").innerHTML = `
     <button class="close" onclick="closeAllModals()">×</button>
     <h2>${f ? "Editar tela" : "Agregar tela"}</h2>
@@ -237,11 +238,10 @@ function openFabricForm(id) {
       </div>
       <div class="full">
         <label>Fotos</label>
-        <div id="ff-existing-imgs" class="gallery">
-          ${existingImgs.map(u => `<div style="position:relative"><img src="${esc(u)}"><button class="btn danger small" style="position:absolute;top:4px;right:4px;padding:2px 7px" onclick="removeFabricImg(this,'${esc(u)}')">×</button></div>`).join("")}
-        </div>
+        <div class="hint" style="margin:0 0 6px">La primera foto (marcada "Principal") es la que se muestra en la tarjeta del catálogo. Usa las flechas para reordenar o "★ Principal" para elegir otra.</div>
+        <div id="ff-existing-imgs" class="gallery"></div>
         <input type="file" id="ff-file-input" multiple accept="image/*" onchange="stageFabricImages(this.files)">
-        <div class="hint">Puedes seleccionar varias fotos. Se suben al guardar.</div>
+        <div class="hint">Puedes seleccionar varias fotos. Se suben al guardar, después de las existentes.</div>
         <div id="ff-staged-list"></div>
       </div>
       <div class="full" style="margin-top:16px;display:flex;gap:8px">
@@ -251,15 +251,46 @@ function openFabricForm(id) {
     </div>`;
   closeAllModals();
   $("#modal-fabric-form").classList.add("show");
+  renderFabricExistingImages();
+}
+function renderFabricExistingImages() {
+  const el = $("#ff-existing-imgs");
+  if (!el) return;
+  const n = fabricExistingOrder.length;
+  el.innerHTML = fabricExistingOrder.map((u, i) => `
+    <div style="position:relative">
+      <img src="${esc(u)}">
+      ${i === 0 ? '<span class="badge premium" style="position:absolute;top:4px;left:4px">Principal</span>' : ""}
+      <button class="btn danger small" style="position:absolute;top:4px;right:4px;padding:2px 7px" onclick="removeFabricImg(${i})">×</button>
+      <div style="position:absolute;bottom:4px;left:4px;right:4px;display:flex;gap:4px;justify-content:space-between;background:rgba(4,8,12,.6);border-radius:6px;padding:3px">
+        <div style="display:flex;gap:4px">
+          <button type="button" class="btn small" style="padding:2px 6px" onclick="moveFabricImg(${i},-1)" ${i === 0 ? "disabled" : ""}>‹</button>
+          <button type="button" class="btn small" style="padding:2px 6px" onclick="moveFabricImg(${i},1)" ${i === n - 1 ? "disabled" : ""}>›</button>
+        </div>
+        ${i !== 0 ? `<button type="button" class="btn small" style="padding:2px 6px" onclick="setFabricImgMain(${i})">★ Principal</button>` : ""}
+      </div>
+    </div>`).join("") || '<div class="small">Sin fotos todavía.</div>';
+}
+function moveFabricImg(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= fabricExistingOrder.length) return;
+  [fabricExistingOrder[i], fabricExistingOrder[j]] = [fabricExistingOrder[j], fabricExistingOrder[i]];
+  renderFabricExistingImages();
+}
+function setFabricImgMain(i) {
+  const [u] = fabricExistingOrder.splice(i, 1);
+  fabricExistingOrder.unshift(u);
+  renderFabricExistingImages();
+}
+function removeFabricImg(i) {
+  const [u] = fabricExistingOrder.splice(i, 1);
+  pendingFabricRemovals.push(u);
+  renderFabricExistingImages();
 }
 function stageFabricImages(fileList) {
   pendingFabricImages.push(...Array.from(fileList));
   $("#ff-staged-list").innerHTML = pendingFabricImages.map((f, i) =>
     `<span class="filepill">${esc(f.name)}<button onclick="pendingFabricImages.splice(${i},1);stageFabricImages([])">×</button></span>`).join("");
-}
-function removeFabricImg(btn, url) {
-  pendingFabricRemovals.push(url);
-  btn.parentElement.remove();
 }
 async function saveFabric(id) {
   const code = $("#ff-code").value.trim().toUpperCase();
@@ -294,13 +325,18 @@ async function saveFabric(id) {
       await sb.from("topstone_fabric_images").delete().eq("fabric_id", fabricId).eq("url", url);
       await removeStorageObject(BUCKET_FABRICS, url);
     }
-    // upload new images
     // NOTE: sort_order is a plain "integer" column (max ~2.1 billion) — it must stay a small
     // sequential index, NOT a millisecond timestamp (Date.now() overflows it and Postgres
     // rejects the insert with "value out of range for type integer", 22003). The upload path
     // filename can safely use Date.now() for uniqueness since that's just text.
-    const existingCount = id ? ((fabrics.find(x => x.id === id) || {}).images || []).length : 0;
-    let sortIndex = Math.max(0, existingCount - pendingFabricRemovals.length);
+    // persist the (possibly reordered) sort_order of images the user kept
+    for (let i = 0; i < fabricExistingOrder.length; i++) {
+      const { error: ordErr } = await sb.from("topstone_fabric_images")
+        .update({ sort_order: i }).eq("fabric_id", fabricId).eq("url", fabricExistingOrder[i]);
+      if (ordErr) throw ordErr;
+    }
+    // upload new images, continuing the order right after the kept ones
+    let sortIndex = fabricExistingOrder.length;
     for (const file of pendingFabricImages) {
       const path = `${code}/${Date.now()}_${slugFile(file.name)}`;
       const url = await uploadFile(BUCKET_FABRICS, path, file);
