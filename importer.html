@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TopStone · Importar fotos de telas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{margin:0;background:#0f1720;color:#eaf1f8;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;padding:30px}
+.wrap{max-width:720px;margin:0 auto}
+h1{font-size:22px}
+p{color:#8ea2b8}
+.box{background:#141e2a;border:1px solid #26374a;border-radius:12px;padding:22px;margin:16px 0}
+button{background:linear-gradient(135deg,#ff5a1f,#c73f10);color:#fff;border:none;padding:11px 18px;border-radius:9px;font-weight:700;cursor:pointer;font-size:14px}
+button:disabled{opacity:.5;cursor:not-allowed}
+input[type=file]{color:#eaf1f8}
+#log{background:#0b1219;border:1px solid #26374a;border-radius:8px;padding:12px;height:320px;overflow:auto;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;margin-top:14px}
+.ok{color:#7fd99a}
+.err{color:#ff8f91}
+.bar{height:8px;background:#26374a;border-radius:999px;overflow:hidden;margin:12px 0}
+.bar > div{height:100%;background:linear-gradient(90deg,#ff5a1f,#ffb020);width:0%;transition:width .2s}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TopStone · Importar fotos de telas</h1>
+  <p>Esta página sube, una sola vez, las fotos ya recopiladas de <code>tarstone_local/catalogo_telas_v3/assets/images_named</code> a Supabase y las vincula con cada tela por su código (los nombres de archivo empiezan con el código y luego el nombre descriptivo de la tela, ej. <code>MN0002_01_MN0002-8020.jpg</code>). Corre 100% en tu navegador — no necesitas nada más.</p>
+  <div class="box">
+    <label>1. Selecciona la carpeta <b>assets/images_named</b>:</label><br><br>
+    <input type="file" id="folder-input" webkitdirectory directory multiple>
+    <div class="bar"><div id="bar-fill"></div></div>
+    <div id="summary"></div>
+    <br>
+    <button id="start-btn" onclick="startImport()" disabled>Subir fotos a Supabase</button>
+    <div id="log"></div>
+  </div>
+</div>
+<script>
+const SUPABASE_URL = "https://cejgurbaweucfpuzvdpw.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlamd1cmJhd2V1Y2ZwdXp2ZHB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5OTM5NDYsImV4cCI6MjA5OTU2OTk0Nn0.XuxVRqjznvt5xS1u9Xx1-Fe7qy4yCGUpTKr0XesxrCE";
+const BUCKET = "topstone-fabrics";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let files = [];
+const logEl = document.getElementById("log");
+function log(msg, cls) {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = msg;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+document.getElementById("folder-input").addEventListener("change", (e) => {
+  files = Array.from(e.target.files).filter(f => /\.(jpe?g|png|webp)$/i.test(f.name));
+  document.getElementById("summary").textContent = `${files.length} imágenes encontradas.`;
+  document.getElementById("start-btn").disabled = files.length === 0;
+});
+
+async function startImport() {
+  const btn = document.getElementById("start-btn");
+  btn.disabled = true;
+  logEl.innerHTML = "";
+
+  // load fabric code -> id map
+  const { data: fabricsData, error } = await sb.from("topstone_fabrics").select("id, code");
+  if (error) { log("Error cargando telas: " + error.message, "err"); return; }
+  const codeToId = {};
+  fabricsData.forEach(f => codeToId[f.code.toUpperCase()] = f.id);
+
+  let ok = 0, skipped = 0, failed = 0;
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    document.getElementById("bar-fill").style.width = Math.round(((i + 1) / files.length) * 100) + "%";
+    const m = file.name.match(/^([A-Za-z]{2}\d{4})_(\d+)_/);
+    if (!m) { log(`⏭ ${file.name}: no coincide patrón CODIGO_NN_...`, "err"); skipped++; continue; }
+    const code = m[1].toUpperCase();
+    const sortOrder = parseInt(m[2], 10);
+    const fabricId = codeToId[code];
+    if (!fabricId) { log(`⏭ ${file.name}: tela ${code} no existe en la base de datos`, "err"); skipped++; continue; }
+    try {
+      const path = `${code}/${file.name}`;
+      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type || undefined });
+      if (upErr) throw upErr;
+      const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(path);
+      // avoid duplicate rows if this script runs twice
+      const { data: existing } = await sb.from("topstone_fabric_images").select("id").eq("fabric_id", fabricId).eq("url", pub.publicUrl);
+      if (!existing || !existing.length) {
+        const { error: insErr } = await sb.from("topstone_fabric_images").insert({ fabric_id: fabricId, url: pub.publicUrl, sort_order: sortOrder });
+        if (insErr) throw insErr;
+      }
+      log(`✔ ${file.name} → ${code}`, "ok");
+      ok++;
+    } catch (e) {
+      log(`✘ ${file.name}: ${e.message}`, "err");
+      failed++;
+    }
+  }
+  log(`\nListo. Subidas: ${ok} · Omitidas: ${skipped} · Con error: ${failed}`);
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>

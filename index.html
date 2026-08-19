@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TopStone · Fabric Selector</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#0f1720; --panel:#141e2a; --panel2:#1a2634; --line:#26374a; --line2:#2f4359;
+  --ink:#eaf1f8; --muted:#8ea2b8; --accent:#ff5a1f; --accent2:#ffb020; --ok:#2ecc71; --warn:#ffb020; --bad:#ff4d4f;
+  --radius:12px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;}
+a{color:inherit}
+.app{display:flex;min-height:100vh}
+.sidebar{width:220px;flex:none;background:var(--panel);border-right:1px solid var(--line);padding:20px 14px;position:sticky;top:0;height:100vh}
+.brand{font-weight:900;font-size:18px;letter-spacing:.02em;margin-bottom:2px}
+.brand span{color:var(--accent)}
+.brand-sub{color:var(--muted);font-size:11px;margin-bottom:22px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;color:var(--muted);font-weight:700;margin-bottom:4px}
+.nav-item:hover{background:var(--panel2);color:var(--ink)}
+.nav-item.active{background:linear-gradient(135deg,var(--accent),#c73f10);color:#fff}
+.main{flex:1;padding:26px 30px 60px;max-width:1500px}
+.view{display:none}
+.view.active{display:block}
+.pagehead{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px;margin-bottom:18px}
+.pagehead h1{margin:0 0 4px;font-size:24px}
+.pagehead p{margin:0;color:var(--muted);max-width:640px}
+.btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line2);padding:9px 14px;border-radius:9px;font-weight:700;cursor:pointer;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),#c73f10);border:none;color:#fff}
+.btn.danger{background:#3a1518;border-color:#5a2226;color:#ff8f91}
+.btn.small{padding:6px 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:110px}
+.stat b{font-size:20px;display:block}
+.stat span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+.toolbar{display:grid;grid-template-columns:minmax(220px,2fr) repeat(4,minmax(120px,1fr)) auto;gap:8px;margin:14px 0}
+input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);color:var(--ink);padding:9px 11px;border-radius:8px;font:inherit}
+textarea{resize:vertical}
+label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
+.card:hover{border-color:var(--accent)}
+.card .thumb{width:100%;height:150px;background:#0b1219;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.card .thumb img{width:100%;height:100%;object-fit:cover}
+.card .thumb .noimg{color:var(--muted);font-size:11px;text-align:center;padding:10px}
+.card .body{padding:12px 14px 14px}
+.card .code{font-weight:900;color:var(--accent2);font-size:14px}
+.card .name{font-weight:700;margin:2px 0 6px;font-size:13px;min-height:34px}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.badge.premium{background:#2a2210;color:var(--accent2)}
+.badge.mid{background:#12253a;color:#7db8ff}
+.badge.basic{background:#1c2a20;color:#7fd99a}
+.badge.none{background:#2a1414;color:#ff9b9b}
+.badge.cat-tops{background:#12253a;color:#7db8ff}
+.badge.cat-bottoms{background:#23142e;color:#c68bff}
+.badge.cat-others{background:#242424;color:#c9c9c9}
+.badge.review{background:#3a1518;color:#ff8f91}
+.row-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.small{color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+th{color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.04em}
+tr:hover td{background:var(--panel2)}
+.table-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:auto}
+.modal-bg{position:fixed;inset:0;background:rgba(4,8,12,.72);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50}
+.modal-bg.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;max-width:920px;width:100%;padding:24px;position:relative}
+.modal h2{margin:0 0 4px}
+.modal .close{position:absolute;top:16px;right:16px;background:var(--panel2);border:1px solid var(--line2);color:var(--ink);border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:12px 0}
+.gallery img{width:100%;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line2);cursor:pointer}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:6px 12px;margin:14px 0;font-size:13px}
+.kv b{color:var(--muted);font-weight:700}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+.formgrid .full{grid-column:1/-1}
+.zone-row{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
+.filepill{display:inline-flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line2);padding:6px 10px;border-radius:8px;margin:4px 6px 0 0;font-size:12px}
+.filepill button{background:none;border:none;color:var(--bad);cursor:pointer;font-weight:900}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--panel2);border:1px solid var(--line2);padding:12px 16px;border-radius:10px;z-index:99;font-size:13px;max-width:340px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.toast.err{border-color:#5a2226;color:#ff8f91}
+.tag-picker{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.tag-opt{padding:5px 10px;border:1px solid var(--line2);border-radius:999px;font-size:11px;cursor:pointer;color:var(--muted)}
+.tag-opt.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.hint{color:var(--muted);font-size:11px;margin-top:4px}
+.pfz-list{margin:10px 0}
+.pfz-item{display:flex;gap:10px;align-items:center;padding:8px 10px;background:var(--panel2);border-radius:8px;margin-bottom:6px}
+.pfz-item img{width:44px;height:44px;object-fit:cover;border-radius:6px;background:#0b1219}
+.pfz-item .zn{font-weight:800;color:var(--accent2);min-width:110px}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.autocomplete{position:relative}
+.ac-list{position:absolute;top:100%;left:0;right:0;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;max-height:220px;overflow:auto;z-index:20;margin-top:2px;display:none}
+.ac-list.show{display:block}
+.ac-item{padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--line)}
+.ac-item:hover{background:var(--panel)}
+footer.note{color:var(--muted);font-size:11px;margin-top:20px}
+@media(max-width:900px){.app{flex-direction:column}.sidebar{width:100%;height:auto;position:relative;display:flex;gap:8px;overflow:auto}.brand,.brand-sub{display:none}.formgrid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar">
+    <div class="brand">Top<span>Stone</span></div>
+    <div class="brand-sub">Fabric Selector</div>
+    <div class="nav-item active" data-view="telas">🧵 Telas</div>
+    <div class="nav-item" data-view="productos">🧩 Productos</div>
+    <div class="nav-item" data-view="clientes">👤 Clientes</div>
+  </div>
+  <div class="main">
+
+    <!-- ================= TELAS ================= -->
+    <div class="view active" id="view-telas">
+      <div class="pagehead">
+        <div>
+          <h1>Catálogo de telas</h1>
+          <p>Listado maestro de telas para jerseys, licras y otros. Extraído del catálogo de Tarstone y editable desde aquí.</p>
+        </div>
+        <button class="btn primary" onclick="openFabricForm()">+ Agregar tela</button>
+      </div>
+      <div class="stats" id="fabric-stats"></div>
+      <div class="toolbar">
+        <input id="f-search" placeholder="Buscar código, nombre, composición…" oninput="renderFabrics()">
+        <select id="f-cat" onchange="renderFabrics()"><option value="">Toda categoría</option><option value="tops">Tops</option><option value="bottoms">Bottoms</option><option value="others">Others</option></select>
+        <select id="f-grade" onchange="renderFabrics()"><option value="">Toda gama</option><option value="Premium">Premium</option><option value="Mid-range">Mid-range</option><option value="Basic">Basic</option><option value="No indicada">No indicada</option></select>
+        <select id="f-review" onchange="renderFabrics()"><option value="">Todas</option><option value="1">Por revisar</option><option value="0">Verificadas</option></select>
+        <select id="f-sort" onchange="renderFabrics()"><option value="code">Ordenar: código</option><option value="compression">Ordenar: compresión</option><option value="recent">Ordenar: recientes</option></select>
+        <button class="btn small" onclick="loadFabrics()">↻</button>
+      </div>
+      <div class="grid" id="fabric-grid"><div class="empty">Cargando telas…</div></div>
+    </div>
+
+    <!-- ================= PRODUCTOS ================= -->
+    <div class="view" id="view-productos">
+      <div class="pagehead">
+        <div>
+          <h1>Productos personalizados</h1>
+          <p>Crea jerseys, bibs, medias, guantes, chalecos, jackets, casquettes, run shorts y run shirts asignando telas por zona.</p>
+        </div>
+        <button class="btn primary" onclick="openProductForm()">+ Crear producto</button>
+      </div>
+      <div class="toolbar" style="grid-template-columns:minmax(220px,2fr) repeat(2,minmax(140px,1fr)) auto">
+        <input id="p-search" placeholder="Buscar código, nombre, cliente…" oninput="renderProducts()">
+        <select id="p-type" onchange="renderProducts()"><option value="">Todo tipo</option></select>
+        <select id="p-client" onchange="renderProducts()"><option value="">Todo cliente</option></select>
+        <button class="btn small" onclick="loadProducts()">↻</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Cliente</th><th>Zonas</th><th>Archivos</th><th>Fecha</th><th></th></tr></thead>
+          <tbody id="product-rows"><tr><td colspan="8" class="empty">Cargando productos…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ================= CLIENTES ================= -->
+    <div class="view" id="view-clientes">
+      <div class="pagehead">
+        <div>
+          <h1>Clientes</h1>
+          <p>Ficha básica de clientes para vincular con los productos que se creen.</p>
+        </div>
+        <button class="btn primary" onclick="openClientForm()">+ Agregar cliente</button>
+      </div>
+      <div class="toolbar" style="grid-template-columns:1fr auto">
+        <input id="c-search" placeholder="Buscar cliente…" oninput="renderClients()">
+        <button class="btn small" onclick="loadClients()">↻</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Código</th><th>Nombre</th><th>Contacto</th><th>Email</th><th>Teléfono</th><th>Productos</th><th></th></tr></thead>
+          <tbody id="client-rows"><tr><td colspan="7" class="empty">Cargando clientes…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer class="note">TopStone Fabric Selector — datos en Supabase (proyecto "Garantias Ciclismo y Mas", esquema topstone_*).</footer>
+  </div>
+</div>
+
+<!-- ============ MODALS ============ -->
+<div class="modal-bg" id="modal-fabric-detail"><div class="modal" id="modal-fabric-detail-body"></div></div>
+<div class="modal-bg" id="modal-fabric-form"><div class="modal" id="modal-fabric-form-body"></div></div>
+<div class="modal-bg" id="modal-product-form"><div class="modal" id="modal-product-form-body" style="max-width:1080px"></div></div>
+<div class="modal-bg" id="modal-product-detail"><div class="modal" id="modal-product-detail-body" style="max-width:900px"></div></div>
+<div class="modal-bg" id="modal-client-form"><div class="modal" id="modal-client-form-body" style="max-width:520px"></div></div>
+
+<script src="app.js"></script>
+</body>
+</html>
