@@ -79,6 +79,12 @@ function fileIcon(kind) {
   return { photo: "🖼️", pdf: "📄", psd: "🎨", ai: "🖊️", other: "📎" }[kind] || "📎";
 }
 function closeAllModals() { $all(".modal-bg").forEach(m => m.classList.remove("show")); }
+function openImageLightbox(url) {
+  if (!url) return;
+  $("#lightbox-img").src = url;
+  $("#modal-img-lightbox").classList.add("show");
+}
+function closeLightbox() { $("#modal-img-lightbox").classList.remove("show"); }
 $all(".modal-bg").forEach(m => m.addEventListener("click", e => { if (e.target === m) m.classList.remove("show"); }));
 
 // ---------- nav ----------
@@ -100,11 +106,17 @@ async function loadFabrics() {
   if (ferr) { toast("Error cargando telas: " + ferr.message, true); return; }
   const { data: idata, error: ierr } = await sb.from("topstone_fabric_images").select("*").order("sort_order");
   if (ierr) { toast("Error cargando imágenes: " + ierr.message, true); return; }
+  const { data: cdata, error: cerr } = await sb.from("topstone_fabric_colors").select("*").order("sort_order");
+  if (cerr) { toast("Error cargando colores: " + cerr.message, true); return; }
   const imgMap = {};
   (idata || []).forEach(row => {
     (imgMap[row.fabric_id] = imgMap[row.fabric_id] || []).push(row.url);
   });
-  fabrics = (fdata || []).map(f => ({ ...f, images: imgMap[f.id] || [] }));
+  const colorMap = {};
+  (cdata || []).forEach(row => {
+    (colorMap[row.fabric_id] = colorMap[row.fabric_id] || []).push(row);
+  });
+  fabrics = (fdata || []).map(f => ({ ...f, images: imgMap[f.id] || [], colors: colorMap[f.id] || [] }));
   renderFabricStats();
   renderFabrics();
 }
@@ -148,9 +160,9 @@ function renderFabrics() {
   const grid = $("#fabric-grid");
   if (!rows.length) { grid.innerHTML = '<div class="empty">No hay telas con esos filtros.</div>'; return; }
   grid.innerHTML = rows.map(f => `
-    <div class="card" onclick="openFabricDetail('${f.id}')">
-      <div class="thumb">${f.images[0] ? `<img loading="lazy" src="${esc(f.images[0])}">` : '<div class="noimg">Sin imagen</div>'}</div>
-      <div class="body">
+    <div class="card">
+      <div class="thumb" onclick="${f.images[0] ? `openImageLightbox('${esc(f.images[0])}')` : `openFabricDetail('${f.id}')`}">${f.images[0] ? `<img loading="lazy" src="${esc(f.images[0])}">` : '<div class="noimg">Sin imagen</div>'}</div>
+      <div class="body" onclick="openFabricDetail('${f.id}')">
         <div class="code">${esc(f.code)}</div>
         <div class="name">${esc(f.name)}</div>
         <div class="row-meta">
@@ -159,6 +171,13 @@ function renderFabrics() {
           ${f.needs_review ? '<span class="badge review">Revisar</span>' : ""}
         </div>
         <div class="small">${esc(f.specification || "—")}</div>
+        ${f.colors.length ? `
+        <div class="color-count-hover">
+          🎨 ${f.colors.length} color${f.colors.length > 1 ? "es" : ""}
+          <div class="color-tooltip">
+            ${f.colors.map(c => `<div class="color-tooltip-item">${c.color_hex ? `<span class="swatch" style="background:${esc(c.color_hex)}"></span>` : ""}${esc(c.color_name)}</div>`).join("")}
+          </div>
+        </div>` : ""}
       </div>
     </div>`).join("");
 }
@@ -175,7 +194,7 @@ function openFabricDetail(id) {
       ${f.needs_review ? '<span class="badge review">Por revisar</span>' : ""}
       ${(f.functions || []).map(x => `<span class="badge mid">${esc(x)}</span>`).join("")}
     </div>
-    <div class="gallery">${f.images.length ? f.images.map(u => `<img src="${esc(u)}" onclick="window.open('${esc(u)}','_blank')">`).join("") : '<div class="small">Sin fotos cargadas todavía.</div>'}</div>
+    <div class="gallery">${f.images.length ? f.images.map(u => `<img src="${esc(u)}" onclick="openImageLightbox('${esc(u)}')">`).join("") : '<div class="small">Sin fotos cargadas todavía.</div>'}</div>
     <div class="kv">
       <b>Especificación</b><span>${esc(f.specification || "—")}</span>
       <b>Composición</b><span>${esc(f.composition || "—")}</span>
@@ -186,6 +205,19 @@ function openFabricDetail(id) {
       ${f.review_notes ? `<b>Notas de revisión</b><span>${esc(f.review_notes)}</span>` : ""}
       <b>Origen</b><span class="small">${esc(f.source_note || "—")}</span>
     </div>
+    ${f.colors.length ? `
+    <label style="margin-top:16px;display:block">Colores disponibles (${f.colors.length})</label>
+    <div class="pfz-list">
+      ${f.colors.map(c => `
+        <div class="pfz-item">
+          ${c.image_url
+            ? `<img src="${esc(c.image_url)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:zoom-in" onclick="openImageLightbox('${esc(c.image_url)}')">`
+            : (c.color_hex
+              ? `<span class="swatch" style="width:28px;height:28px;border-radius:6px;background:${esc(c.color_hex)}"></span>`
+              : '<div style="width:44px;height:44px;background:#0b1219;border-radius:6px"></div>')}
+          <div style="flex:1"><b>${esc(c.color_name)}</b>${c.notes ? `<div class="small">${esc(c.notes)}</div>` : ""}</div>
+        </div>`).join("")}
+    </div>` : ""}
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn primary" onclick="closeAllModals();openFabricForm('${f.id}')">Editar</button>
       <button class="btn danger" onclick="deleteFabric('${f.id}')">Borrar</button>
@@ -197,12 +229,17 @@ function openFabricDetail(id) {
 let pendingFabricImages = []; // File objects staged for upload on save
 let pendingFabricRemovals = []; // urls to remove on save
 let fabricExistingOrder = []; // ordered urls of currently-kept existing images (index 0 = principal)
+let fabricColorRows = []; // [{color_name, color_hex, notes, existingUrl, newFile}]
 
 function openFabricForm(id) {
   const f = id ? fabrics.find(x => x.id === id) : null;
   pendingFabricImages = [];
   pendingFabricRemovals = [];
   fabricExistingOrder = f ? f.images.slice() : [];
+  fabricColorRows = f ? f.colors.map(c => ({
+    color_name: c.color_name, color_hex: c.color_hex || "", notes: c.notes || "",
+    existingUrl: c.image_url || "", newFile: null,
+  })) : [];
   $("#modal-fabric-form-body").innerHTML = `
     <button class="close" onclick="closeAllModals()">×</button>
     <h2>${f ? "Editar tela" : "Agregar tela"}</h2>
@@ -237,6 +274,12 @@ function openFabricForm(id) {
         </div>
       </div>
       <div class="full">
+        <label>Colores disponibles</label>
+        <div class="hint" style="margin:0 0 6px">Si esta tela viene en varios colores bajo el mismo código, agrégalos aquí — se muestran como cantidad en la tarjeta y en el detalle.</div>
+        <div id="ff-colors"></div>
+        <button type="button" class="btn small" onclick="addColorRow()">+ Agregar color</button>
+      </div>
+      <div class="full">
         <label>Fotos</label>
         <div class="hint" style="margin:0 0 6px">La primera foto (marcada "Principal") es la que se muestra en la tarjeta del catálogo. Usa las flechas para reordenar o "★ Principal" para elegir otra.</div>
         <div id="ff-existing-imgs" class="gallery"></div>
@@ -252,6 +295,35 @@ function openFabricForm(id) {
   closeAllModals();
   $("#modal-fabric-form").classList.add("show");
   renderFabricExistingImages();
+  renderColorRows();
+}
+function renderColorRows() {
+  const el = $("#ff-colors");
+  if (!el) return;
+  el.innerHTML = fabricColorRows.map((c, i) => `
+    <div class="color-row">
+      <div><label style="margin:0 0 3px">Color</label>
+        <input type="color" class="color-input" value="${c.color_hex || "#888888"}" title="Color (opcional)" onchange="fabricColorRows[${i}].color_hex=this.value">
+      </div>
+      <div><label style="margin:0 0 3px">Nombre del color *</label><input value="${esc(c.color_name || "")}" placeholder="Ej: Azul marino" oninput="fabricColorRows[${i}].color_name=this.value"></div>
+      <div><label style="margin:0 0 3px">Nota</label><input value="${esc(c.notes || "")}" oninput="fabricColorRows[${i}].notes=this.value"></div>
+      <div>
+        <label style="margin:0 0 3px">Foto (opcional)</label>
+        ${c.existingUrl && !c.newFile ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><img src="${esc(c.existingUrl)}" style="width:30px;height:30px;object-fit:cover;border-radius:6px"><button type="button" class="btn danger small" style="padding:2px 6px" onclick="fabricColorRows[${i}].existingUrl='';renderColorRows()">×</button></div>` : ""}
+        <input type="file" accept="image/*" onchange="stageColorImage(${i}, this.files[0])">
+      </div>
+      <button type="button" class="btn danger small" onclick="removeColorRow(${i})">×</button>
+    </div>`).join("") || '<div class="small">Sin colores agregados — si la tela solo viene en un color, puedes dejar esto vacío.</div>';
+}
+function addColorRow() {
+  fabricColorRows.push({ color_name: "", color_hex: "", notes: "", existingUrl: "", newFile: null });
+  renderColorRows();
+}
+function removeColorRow(i) { fabricColorRows.splice(i, 1); renderColorRows(); }
+function stageColorImage(i, file) {
+  if (!file) return;
+  fabricColorRows[i].newFile = file;
+  renderColorRows();
 }
 function renderFabricExistingImages() {
   const el = $("#ff-existing-imgs");
@@ -343,6 +415,22 @@ async function saveFabric(id) {
       const { error: imgErr } = await sb.from("topstone_fabric_images").insert({ fabric_id: fabricId, url, sort_order: sortIndex++ });
       if (imgErr) throw imgErr;
     }
+    // colors: clear + reinsert (simple + reliable, same pattern as zones/sizes)
+    const validColors = fabricColorRows.filter(c => c.color_name.trim());
+    await sb.from("topstone_fabric_colors").delete().eq("fabric_id", fabricId);
+    for (let i = 0; i < validColors.length; i++) {
+      const c = validColors[i];
+      let imageUrl = c.existingUrl || "";
+      if (c.newFile) {
+        const path = `${code}/colors/${Date.now()}_${slugFile(c.newFile.name)}`;
+        imageUrl = await uploadFile(BUCKET_FABRICS, path, c.newFile);
+      }
+      const { error: colErr } = await sb.from("topstone_fabric_colors").insert({
+        fabric_id: fabricId, color_name: c.color_name.trim(), color_hex: c.color_hex || "",
+        image_url: imageUrl, notes: (c.notes || "").trim(), sort_order: i,
+      });
+      if (colErr) throw colErr;
+    }
     toast("Tela guardada ✓");
     closeAllModals();
     await loadFabrics();
@@ -358,6 +446,7 @@ async function deleteFabric(id) {
   if (!confirm(`¿Borrar la tela ${f.code}? También se borrarán sus fotos y se desvinculará de productos que la usen.`)) return;
   try {
     for (const url of f.images) await removeStorageObject(BUCKET_FABRICS, url);
+    for (const c of f.colors) if (c.image_url) await removeStorageObject(BUCKET_FABRICS, c.image_url);
     const { error } = await sb.from("topstone_fabrics").delete().eq("id", id);
     if (error) throw error;
     toast("Tela borrada");

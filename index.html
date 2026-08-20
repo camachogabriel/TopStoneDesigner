@@ -43,9 +43,10 @@ input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(-
 textarea{resize:vertical}
 label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;font-weight:700}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:10px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);cursor:pointer;display:flex;flex-direction:column}
 .card:hover{border-color:var(--accent)}
-.card .thumb{width:100%;height:150px;background:#0b1219;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.card .thumb{width:100%;height:150px;background:#0b1219;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;border-radius:var(--radius) var(--radius) 0 0}
+.card .body{cursor:pointer}
 .card .thumb img{width:100%;height:100%;object-fit:cover}
 .card .thumb .noimg{color:var(--muted);font-size:11px;text-align:center;padding:10px}
 .card .body{padding:12px 14px 14px}
@@ -80,6 +81,13 @@ tr:hover td{background:var(--panel2)}
 .formgrid .full{grid-column:1/-1}
 .zone-row{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
 .size-row{display:grid;grid-template-columns:.9fr .7fr 1fr 1.6fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
+.color-row{display:grid;grid-template-columns:.6fr 1.2fr 1.2fr 1.4fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
+.color-input{width:100%;height:38px;padding:2px;border:1px solid var(--line2);border-radius:6px;background:var(--panel);cursor:pointer}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;border:1px solid rgba(255,255,255,.25);vertical-align:middle}
+.color-count-hover{position:relative;display:inline-block;margin-top:6px;font-size:11px;color:var(--muted)}
+.color-tooltip{display:none;position:absolute;bottom:100%;left:0;margin-bottom:6px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;min-width:140px;max-width:220px;z-index:20;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.color-count-hover:hover .color-tooltip{display:block}
+.color-tooltip-item{padding:2px 0;font-size:12px;color:var(--ink);white-space:nowrap}
 .filepill{display:inline-flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line2);padding:6px 10px;border-radius:8px;margin:4px 6px 0 0;font-size:12px}
 .filepill button{background:none;border:none;color:var(--bad);cursor:pointer;font-weight:900}
 .empty{padding:40px;text-align:center;color:var(--muted)}
@@ -95,13 +103,16 @@ tr:hover td{background:var(--panel2)}
 .pfz-item .zn{font-weight:800;color:var(--accent2);min-width:110px}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
 @keyframes spin{to{transform:rotate(360deg)}}
+.modal-bg.lightbox-bg{align-items:center;padding:20px}
+.modal-bg.lightbox-bg img{max-width:92vw;max-height:92vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.6);cursor:zoom-out}
+.modal-bg.lightbox-bg .close{position:fixed;top:20px;right:24px;background:var(--panel2);border:1px solid var(--line2);color:var(--ink);border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;z-index:60}
 .autocomplete{position:relative}
 .ac-list{position:absolute;top:100%;left:0;right:0;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;max-height:220px;overflow:auto;z-index:20;margin-top:2px;display:none}
 .ac-list.show{display:block}
 .ac-item{padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--line)}
 .ac-item:hover{background:var(--panel)}
 footer.note{color:var(--muted);font-size:11px;margin-top:20px}
-@media(max-width:900px){.app{flex-direction:column}.sidebar{width:100%;height:auto;position:relative;display:flex;gap:8px;overflow:auto}.brand,.brand-sub{display:none}.formgrid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.size-row{grid-template-columns:1fr}}
+@media(max-width:900px){.app{flex-direction:column}.sidebar{width:100%;height:auto;position:relative;display:flex;gap:8px;overflow:auto}.brand,.brand-sub{display:none}.formgrid{grid-template-columns:1fr}.zone-row{grid-template-columns:1fr}.size-row{grid-template-columns:1fr}.color-row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -190,6 +201,10 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
 <div class="modal-bg" id="modal-product-form"><div class="modal" id="modal-product-form-body" style="max-width:1080px"></div></div>
 <div class="modal-bg" id="modal-product-detail"><div class="modal" id="modal-product-detail-body" style="max-width:900px"></div></div>
 <div class="modal-bg" id="modal-client-form"><div class="modal" id="modal-client-form-body" style="max-width:520px"></div></div>
+<div class="modal-bg lightbox-bg" id="modal-img-lightbox">
+  <button class="close" onclick="closeLightbox()">×</button>
+  <img id="lightbox-img" src="" alt="Foto de tela" onclick="closeLightbox()">
+</div>
 
 <script src="app.js"></script>
 </body>
