@@ -3,6 +3,7 @@ const SUPABASE_URL = "https://cejgurbaweucfpuzvdpw.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlamd1cmJhd2V1Y2ZwdXp2ZHB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5OTM5NDYsImV4cCI6MjA5OTU2OTk0Nn0.XuxVRqjznvt5xS1u9Xx1-Fe7qy4yCGUpTKr0XesxrCE";
 const BUCKET_FABRICS = "topstone-fabrics";
 const BUCKET_PRODUCTS = "topstone-products";
+const BUCKET_PADS = "topstone-pads";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -579,50 +580,69 @@ async function deleteFabric(id) {
 // not created as products themselves.
 // =====================================================================
 async function loadPads() {
-  const body = $("#pad-rows");
-  if (body) body.innerHTML = '<tr><td colspan="8" class="empty">Cargando pads…</td></tr>';
+  const grid = $("#pad-grid");
+  if (grid) grid.innerHTML = '<div class="empty">Cargando pads…</div>';
   const { data, error } = await sb.from("topstone_pads").select("*").order("code");
   if (error) { toast("Error cargando pads: " + error.message, true); return; }
   const { data: idata, error: ierr } = await sb.from("topstone_pad_images").select("*").order("sort_order");
   if (ierr) { toast("Error cargando fotos de pads: " + ierr.message, true); return; }
+  const { data: vdata, error: verr } = await sb.from("topstone_pad_variants").select("*").order("sort_order");
+  if (verr) { toast("Error cargando variantes de pads: " + verr.message, true); return; }
   const imgMap = {};
   (idata || []).forEach(row => {
     (imgMap[row.pad_id] = imgMap[row.pad_id] || []).push(row.url);
   });
-  pads = (data || []).map(p => ({ ...p, images: imgMap[p.id] || [] }));
+  const varMap = {};
+  (vdata || []).forEach(row => {
+    (varMap[row.pad_id] = varMap[row.pad_id] || []).push(row);
+  });
+  pads = (data || []).map(p => ({ ...p, images: imgMap[p.id] || [], variants: varMap[p.id] || [] }));
   renderPads();
 }
+function padThumb(p) {
+  if (p.images && p.images[0]) return p.images[0];
+  const withPhoto = (p.variants || []).find(v => v.image_url);
+  return withPhoto ? withPhoto.image_url : "";
+}
 function renderPads() {
-  const body = $("#pad-rows");
-  if (!body) return;
+  const grid = $("#pad-grid");
+  if (!grid) return;
   const q = ($("#pd-search").value || "").toLowerCase();
   const origin = $("#pd-origin") ? $("#pd-origin").value : "";
   let rows = pads.filter(p => !q || (p.code + " " + p.name + " " + p.brand).toLowerCase().includes(q));
   if (origin) rows = rows.filter(p => p.origin === origin);
-  if (!rows.length) { body.innerHTML = '<tr><td colspan="9" class="empty">Sin pads todavía. Crea el primero con "+ Agregar pad".</td></tr>'; return; }
-  body.innerHTML = rows.map(p => `
-    <tr style="cursor:pointer" onclick="openPadDetail('${p.id}')">
-      <td>${p.images && p.images[0] ? `<img src="${esc(p.images[0])}" style="width:36px;height:36px;object-fit:cover;border-radius:6px">` : ""}</td>
-      <td><b style="color:var(--accent2)">${esc(p.code)}</b></td>
-      <td>${esc(p.name || "—")}</td>
-      <td>${esc(p.brand || "—")}</td>
-      <td>${esc(p.pad_gender || "—")}</td>
-      <td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td>
-      <td>${esc(p.pad_usage || "—")}</td>
-      <td>${p.origin ? `<span class="badge mid">${esc(p.origin)}</span>` : "—"}</td>
-      <td onclick="event.stopPropagation()">
-        <button class="btn small" onclick="openPadForm('${p.id}')">Editar</button>
-        <button class="btn danger small" onclick="deletePad('${p.id}')">Borrar</button>
-      </td>
-    </tr>`).join("");
+  if (!rows.length) { grid.innerHTML = '<div class="empty">Sin pads todavía. Crea el primero con "+ Agregar pad".</div>'; return; }
+  grid.innerHTML = rows.map(p => {
+    const thumb = padThumb(p);
+    const genders = (p.variants || []).length ? (p.variants || []).map(v => v.gender).filter(Boolean) : (p.pad_gender ? [p.pad_gender] : []);
+    return `
+    <div class="card">
+      <div class="thumb" onclick="${thumb ? `openImageLightbox('${esc(thumb)}')` : `openPadDetail('${p.id}')`}">${thumb ? `<img loading="lazy" src="${esc(thumb)}">` : '<div class="noimg">Sin imagen</div>'}</div>
+      <div class="body" onclick="openPadDetail('${p.id}')">
+        <div class="code">${esc(p.code)}</div>
+        <div class="name">${esc(p.name || "—")}</div>
+        <div class="row-meta">
+          ${p.brand ? `<span class="badge mid">${esc(p.brand)}</span>` : ""}
+          ${p.origin ? `<span class="badge mid">${esc(p.origin)}</span>` : ""}
+          ${genders.map(g => `<span class="badge mid">${esc(g)}</span>`).join("")}
+        </div>
+        <div class="small">${esc(p.pad_usage || "—")}${p.pad_thickness_mm != null ? " · " + esc(String(p.pad_thickness_mm)) + " mm" : ""}</div>
+      </div>
+    </div>`;
+  }).join("");
 }
+let padVariantRows = []; // [{gender, supplier_code, thickness_mm, size_text, notes, existingUrl, newFile}]
 function openPadForm(id) {
   const p = id ? pads.find(x => x.id === id) : null;
+  padVariantRows = p ? p.variants.map(v => ({
+    gender: v.gender || "", supplier_code: v.supplier_code || "", thickness_mm: v.thickness_mm ?? "",
+    size_text: v.size_text || "", notes: v.notes || "", existingUrl: v.image_url || "", newFile: null,
+  })) : [];
   $("#modal-pad-form-body").innerHTML = `
     <button class="close" onclick="closeAllModals()">×</button>
     <h2>${p ? "Editar pad" : "Agregar pad"}</h2>
     <div class="formgrid">
-      <div><label>Nombre</label><input id="pd-name" value="${p ? esc(p.name) : ""}" placeholder="Ej: Elastic Interface Road HCS"></div>
+      <div><label>Nombre</label><input id="pd-name" value="${p ? esc(p.name) : ""}" placeholder="Ej: Ronde HP"></div>
       <div><label>Marca</label><input id="pd-brand" value="${p ? esc(p.brand) : "Elastic Interface"}"></div>
       <div><label>Origen</label>
         <select id="pd-origin-field">
@@ -631,8 +651,8 @@ function openPadForm(id) {
           <option value="Italiano" ${p?.origin === "Italiano" ? "selected" : ""}>Italiano</option>
         </select>
       </div>
-      <div><label>Código de proveedor</label><input id="pd-supplier-code" value="${p ? esc(p.supplier_code || "") : ""}" placeholder="Ej: KD0015"></div>
-      <div><label>Género</label>
+      <div><label>Código de proveedor (si no varía por género)</label><input id="pd-supplier-code" value="${p ? esc(p.supplier_code || "") : ""}" placeholder="Ej: KD0015"></div>
+      <div><label>Género (si el pad no tiene variantes por género)</label>
         <select id="pd-gender">
           <option value="">— sin indicar —</option>
           ${PAD_GENDER_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_gender === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
@@ -662,7 +682,7 @@ function openPadForm(id) {
           ${PAD_USAGE_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_usage === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
         </select>
       </div>
-      <div><label>Grosor (mm)</label><input type="number" id="pd-thickness" min="0" step="0.5" value="${p?.pad_thickness_mm ?? ""}" placeholder="Ej: 8"></div>
+      <div><label>Grosor (mm) — si no varía por género</label><input type="number" id="pd-thickness" min="0" step="0.5" value="${p?.pad_thickness_mm ?? ""}" placeholder="Ej: 8"></div>
       <div><label>Horas de uso recomendadas</label>
         <select id="pd-hours">
           <option value="">— sin indicar —</option>
@@ -684,6 +704,12 @@ function openPadForm(id) {
         </div>
       </div>
       <div class="full"><label>Descripción</label><textarea id="pd-desc" rows="3">${p ? esc(p.description) : ""}</textarea></div>
+      <div class="full">
+        <label>Variantes por género</label>
+        <div class="hint" style="margin:0 0 6px">Si este pad viene en versión hombre y mujer (mismo modelo, distinto código de proveedor / grosor / tamaño / foto), agrégalas aquí en vez de crear un pad separado por cada una.</div>
+        <div id="pd-variants"></div>
+        <button type="button" class="btn small" onclick="addVariantRow()">+ Agregar variante de género</button>
+      </div>
     </div>
     <div style="margin-top:18px;display:flex;gap:8px">
       <button class="btn primary" id="pd-save-btn" onclick="savePad('${p ? p.id : ""}')">Guardar pad</button>
@@ -693,6 +719,39 @@ function openPadForm(id) {
   `;
   closeAllModals();
   $("#modal-pad-form").classList.add("show");
+  renderVariantRows();
+}
+function renderVariantRows() {
+  const el = $("#pd-variants");
+  if (!el) return;
+  el.innerHTML = padVariantRows.map((v, i) => `
+    <div class="color-row">
+      <div><label style="margin:0 0 3px">Género *</label>
+        <select onchange="padVariantRows[${i}].gender=this.value">
+          <option value="">— elegir —</option>
+          ${PAD_GENDER_OPTIONS.map(g => `<option value="${esc(g)}" ${v.gender === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label style="margin:0 0 3px">Código proveedor</label><input value="${esc(v.supplier_code || "")}" placeholder="Ej: KD0015" oninput="padVariantRows[${i}].supplier_code=this.value"></div>
+      <div><label style="margin:0 0 3px">Grosor (mm)</label><input type="number" min="0" step="0.5" value="${v.thickness_mm ?? ""}" oninput="padVariantRows[${i}].thickness_mm=this.value"></div>
+      <div><label style="margin:0 0 3px">Tamaño</label><input value="${esc(v.size_text || "")}" placeholder="Ej: 388×200 mm" oninput="padVariantRows[${i}].size_text=this.value"></div>
+      <div>
+        <label style="margin:0 0 3px">Foto (opcional)</label>
+        ${v.existingUrl && !v.newFile ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><img src="${esc(v.existingUrl)}" style="width:30px;height:30px;object-fit:cover;border-radius:6px"><button type="button" class="btn danger small" style="padding:2px 6px" onclick="padVariantRows[${i}].existingUrl='';renderVariantRows()">×</button></div>` : ""}
+        <input type="file" accept="image/*" onchange="stageVariantImage(${i}, this.files[0])">
+      </div>
+      <button type="button" class="btn danger small" onclick="removeVariantRow(${i})">×</button>
+    </div>`).join("") || '<div class="small">Sin variantes agregadas — si este pad no se divide por género, puedes dejar esto vacío y usar el campo "Género" de arriba.</div>';
+}
+function addVariantRow() {
+  padVariantRows.push({ gender: "", supplier_code: "", thickness_mm: "", size_text: "", notes: "", existingUrl: "", newFile: null });
+  renderVariantRows();
+}
+function removeVariantRow(i) { padVariantRows.splice(i, 1); renderVariantRows(); }
+function stageVariantImage(i, file) {
+  if (!file) return;
+  padVariantRows[i].newFile = file;
+  renderVariantRows();
 }
 async function savePad(id) {
   const btn = $("#pd-save-btn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Guardando…';
@@ -714,17 +773,37 @@ async function savePad(id) {
       pad_treatments: $all("#pd-treatments .tag-opt.on").map(t => t.dataset.tag),
       description: $("#pd-desc").value.trim(),
     };
+    let padId = id, code = id ? pads.find(x => x.id === id)?.code : null;
     if (id) {
       const { error } = await sb.from("topstone_pads").update(payload).eq("id", id);
       if (error) throw error;
-      toast("Pad guardado ✓");
     } else {
       const { data: codeData, error: codeErr } = await sb.rpc("topstone_next_pad_code");
       if (codeErr) throw codeErr;
-      const { error } = await sb.from("topstone_pads").insert({ ...payload, code: codeData });
+      code = codeData;
+      const { data, error } = await sb.from("topstone_pads").insert({ ...payload, code }).select().single();
       if (error) throw error;
-      toast(`Pad ${codeData} guardado ✓`);
+      padId = data.id;
     }
+    // gender variants: clear + reinsert (same pattern as fabric colors/zones)
+    const validVariants = padVariantRows.filter(v => v.gender);
+    await sb.from("topstone_pad_variants").delete().eq("pad_id", padId);
+    for (let i = 0; i < validVariants.length; i++) {
+      const v = validVariants[i];
+      let imageUrl = v.existingUrl || "";
+      if (v.newFile) {
+        const path = `${code}/variants/${Date.now()}_${slugFile(v.newFile.name)}`;
+        imageUrl = await uploadFile(BUCKET_PADS, path, v.newFile);
+      }
+      const { error: varErr } = await sb.from("topstone_pad_variants").insert({
+        pad_id: padId, gender: v.gender, supplier_code: (v.supplier_code || "").trim(),
+        thickness_mm: v.thickness_mm ? parseFloat(v.thickness_mm) : null,
+        size_text: (v.size_text || "").trim(), notes: (v.notes || "").trim(), sort_order: i,
+        image_url: imageUrl,
+      });
+      if (varErr) throw varErr;
+    }
+    toast(`Pad ${code} guardado ✓`);
     closeAllModals();
     await loadPads();
   } catch (e) {
@@ -744,23 +823,37 @@ function openPadDetail(id) {
       ${p.origin ? `<span class="badge mid">${esc(p.origin)}</span>` : ""}
       ${p.supplier_code ? `<span class="badge mid">Prov: ${esc(p.supplier_code)}</span>` : ""}
     </div>
-    ${(p.images || []).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">${p.images.map(u => `<img src="${esc(u)}" style="width:160px;border-radius:8px">`).join("")}</div>` : ""}
+    ${(p.images || []).length ? `<div class="gallery">${p.images.map(u => `<img src="${esc(u)}" onclick="openImageLightbox('${esc(u)}')">`).join("")}</div>` : ""}
     ${p.description ? `<p class="small">${esc(p.description)}</p>` : ""}
     <div class="table-wrap" style="margin-bottom:10px">
       <table>
         <tbody>
-          <tr><td><b>Género</b></td><td>${esc(p.pad_gender || "—")}</td></tr>
+          ${!p.variants.length ? `<tr><td><b>Género</b></td><td>${esc(p.pad_gender || "—")}</td></tr>` : ""}
           <tr><td><b>Densidad de espuma</b></td><td>${esc(p.pad_density || "—")}</td></tr>
           <tr><td><b>Tecnología de espuma</b></td><td>${esc(p.pad_foam_tech || "—")}</td></tr>
           <tr><td><b>Tejido superior</b></td><td>${esc(p.pad_topsheet || "—")}</td></tr>
           <tr><td><b>Uso recomendado</b></td><td>${esc(p.pad_usage || "—")}</td></tr>
-          <tr><td><b>Grosor</b></td><td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td></tr>
+          ${!p.variants.length ? `<tr><td><b>Grosor</b></td><td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td></tr>` : ""}
           <tr><td><b>Horas de uso</b></td><td>${esc(p.pad_hours || "—")}</td></tr>
           <tr><td><b>Fijación</b></td><td>${esc(p.pad_attachment || "—")}</td></tr>
           <tr><td><b>Tratamientos</b></td><td>${(p.pad_treatments || []).length ? (p.pad_treatments || []).map(esc).join(", ") : "—"}</td></tr>
         </tbody>
       </table>
     </div>
+    ${p.variants.length ? `
+    <div style="margin-bottom:10px">
+      <div class="small" style="margin-bottom:6px"><b>Variantes por género</b></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${p.variants.map(v => `
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px;min-width:160px">
+            ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:100%;max-width:140px;border-radius:8px;cursor:pointer;margin-bottom:6px" onclick="openImageLightbox('${esc(v.image_url)}')">` : ""}
+            <div><b>${esc(v.gender || "—")}</b></div>
+            ${v.supplier_code ? `<div class="small">Prov: ${esc(v.supplier_code)}</div>` : ""}
+            ${v.thickness_mm != null ? `<div class="small">${esc(String(v.thickness_mm))} mm</div>` : ""}
+            ${v.size_text ? `<div class="small">${esc(v.size_text)}</div>` : ""}
+          </div>`).join("")}
+      </div>
+    </div>` : ""}
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn primary" onclick="closeAllModals();openPadForm('${p.id}')">Editar</button>
       <button class="btn danger" onclick="deletePad('${p.id}')">Borrar</button>
@@ -772,11 +865,15 @@ async function deletePad(id) {
   const p = pads.find(x => x.id === id);
   if (!p) return;
   if (!confirm(`¿Borrar el pad ${p.code}? Se desvinculará de las zonas de producto que lo usen (esas zonas quedan sin pad asignado).`)) return;
-  const { error } = await sb.from("topstone_pads").delete().eq("id", id);
-  if (error) { toast("Error: " + error.message, true); return; }
-  toast("Pad borrado");
-  closeAllModals();
-  await loadPads();
+  try {
+    for (const url of p.images) await removeStorageObject(BUCKET_PADS, url);
+    for (const v of p.variants) if (v.image_url) await removeStorageObject(BUCKET_PADS, v.image_url);
+    const { error } = await sb.from("topstone_pads").delete().eq("id", id);
+    if (error) throw error;
+    toast("Pad borrado");
+    closeAllModals();
+    await loadPads();
+  } catch (e) { toast("Error: " + e.message, true); }
 }
 
 // =====================================================================

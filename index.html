@@ -170,12 +170,7 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
         </select>
         <button class="btn small" onclick="loadPads()">↻</button>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th></th><th>Código</th><th>Nombre</th><th>Marca</th><th>Género</th><th>Grosor</th><th>Uso</th><th>Origen</th><th></th></tr></thead>
-          <tbody id="pad-rows"><tr><td colspan="9" class="empty">Cargando pads…</td></tr></tbody>
-        </table>
-      </div>
+      <div class="grid" id="pad-grid"><div class="empty">Cargando pads…</div></div>
     </div>
 
     <!-- ================= PRODUCTOS ================= -->
@@ -241,6 +236,6 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
 </div>
 
 <!-- cache-busting: bump ?v= on every future app.js change so browsers/CDN never serve a stale copy -->
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
