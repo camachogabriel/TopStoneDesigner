@@ -140,6 +140,7 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
         <input id="f-search" placeholder="Buscar código, nombre, composición…" oninput="renderFabrics()">
         <select id="f-cat" onchange="renderFabrics()"><option value="">Toda categoría</option><option value="tops">Tops</option><option value="bottoms">Bottoms</option><option value="others">Others</option></select>
         <select id="f-grade" onchange="renderFabrics()"><option value="">Toda gama</option><option value="Premium">Premium</option><option value="Mid-range">Mid-range</option><option value="Basic">Basic</option><option value="No indicada">No indicada</option></select>
+        <select id="f-func" onchange="renderFabrics()"><option value="">Toda característica</option></select>
         <select id="f-review" onchange="renderFabrics()"><option value="">Todas</option><option value="1">Por revisar</option><option value="0">Verificadas</option></select>
         <select id="f-sort" onchange="renderFabrics()"><option value="code">Ordenar: código</option><option value="compression">Ordenar: compresión</option><option value="recent">Ordenar: recientes</option></select>
         <button class="btn small" onclick="loadFabrics()">↻</button>

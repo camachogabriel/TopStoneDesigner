@@ -16,10 +16,24 @@ const PRODUCT_TYPES = [
   { value: "casquette", label: "Casquette" },
   { value: "run_short", label: "Run Short" },
   { value: "run_shirt", label: "Run Shirt" },
+  { value: "pad", label: "Pad / Badana" },
 ];
 
 const SIZE_OPTIONS = ["2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL"];
 const GENDER_OPTIONS = ["Hombre", "Mujer", "Unisex"];
+
+const FABRIC_FUNCTIONS = ["Compresión", "Anti-deslizante / Grip", "Transpirable", "Secado rápido", "Repelente al agua", "Cortaviento", "Térmico / Fleece", "Reflectivo", "UV / UPF", "Grafeno", "Antibacterial", "Seamless / Clean-cut", "Alta elasticidad", "Ligera", "Jacquard / Textura", "Malla / Mesh", "Aero"];
+
+// Pad/badana characteristics — terminology based on Elastic Interface's own product literature
+// (chamois-design and long-distance-pad guides at elasticinterface.com)
+const PAD_GENDER_OPTIONS = ["Hombre", "Mujer", "Unisex", "Niño"];
+const PAD_DENSITY_OPTIONS = ["Adaptativa (~80 kg/m³)", "Media (~110 kg/m³)", "Alta / HCS (~200 kg/m³)", "Multi-densidad"];
+const PAD_FOAM_OPTIONS = ["Célula cerrada", "Célula abierta", "Híbrida (HCS: cerrada + abierta)", "Reticulada (sandwich 3 capas)"];
+const PAD_TOPSHEET_OPTIONS = ["Estándar transpirable", "Super Air Layer (perforado)", "Air Mapping (zonas sin espuma)"];
+const PAD_USAGE_OPTIONS = ["Ruta / Road", "Gravel", "MTB", "Triatlón / TT", "Ultra-distancia / Ultracycling"];
+const PAD_HOURS_OPTIONS = ["Hasta 3h", "3-5h", "5-8h", "8h+ / Ultra"];
+const PAD_ATTACHMENT_OPTIONS = ["Cosido (sewn-in)", "Termosellado / pegado (bonded)"];
+const PAD_TREATMENT_OPTIONS = ["Antibacterial", "Secado rápido", "Control térmico", "Anti-rozadura (wings)"];
 
 let fabrics = [];       // cache: [{...fabric, images:[url,...]}]
 let clients = [];
@@ -118,7 +132,20 @@ async function loadFabrics() {
   });
   fabrics = (fdata || []).map(f => ({ ...f, images: imgMap[f.id] || [], colors: colorMap[f.id] || [] }));
   renderFabricStats();
+  populateFuncFilter();
   renderFabrics();
+}
+
+function populateFuncFilter() {
+  const sel = $("#f-func");
+  if (!sel) return;
+  const current = sel.value;
+  const found = new Set();
+  fabrics.forEach(f => (f.functions || []).forEach(fn => found.add(fn)));
+  // keep the known list first (in a sensible order), then any custom tags found in the data
+  const ordered = FABRIC_FUNCTIONS.filter(fn => found.has(fn)).concat([...found].filter(fn => !FABRIC_FUNCTIONS.includes(fn)).sort());
+  sel.innerHTML = '<option value="">Toda característica</option>' + ordered.map(fn => `<option value="${esc(fn)}">${esc(fn)}</option>`).join("");
+  sel.value = current;
 }
 
 function renderFabricStats() {
@@ -140,11 +167,13 @@ function renderFabrics() {
   const q = ($("#f-search").value || "").toLowerCase();
   const cat = $("#f-cat").value;
   const grade = $("#f-grade").value;
+  const func = $("#f-func") ? $("#f-func").value : "";
   const review = $("#f-review").value;
   const sort = $("#f-sort").value;
   let rows = fabrics.filter(f => {
     if (cat && f.category !== cat) return false;
     if (grade && f.grade !== grade) return false;
+    if (func && !(f.functions || []).includes(func)) return false;
     if (review === "1" && !f.needs_review) return false;
     if (review === "0" && f.needs_review) return false;
     if (q) {
@@ -267,7 +296,7 @@ function openFabricForm(id) {
       <div class="full">
         <label>Funcionalidad</label>
         <div class="tag-picker" id="ff-functions">
-          ${["Compresión","Anti-deslizante / Grip","Transpirable","Secado rápido","Repelente al agua","Cortaviento","Térmico / Fleece","Reflectivo","UV / UPF","Grafeno","Antibacterial","Seamless / Clean-cut","Alta elasticidad","Ligera","Jacquard / Textura","Malla / Mesh"].map(tag => {
+          ${FABRIC_FUNCTIONS.map(tag => {
             const on = f && (f.functions || []).includes(tag);
             return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(tag)}" onclick="this.classList.toggle('on')">${esc(tag)}</span>`;
           }).join("")}
@@ -629,7 +658,7 @@ function openProductForm(id) {
     <h2>${p ? "Editar producto" : "Crear producto"}</h2>
     <div class="formgrid">
       <div><label>Tipo de prenda *</label>
-        <select id="pf-type" ${p ? "disabled" : ""}>
+        <select id="pf-type" ${p ? "disabled" : ""} onchange="toggleProductTypeFields()">
           ${PRODUCT_TYPES.map(t => `<option value="${t.value}" ${p?.product_type === t.value ? "selected" : ""}>${t.label}</option>`).join("")}
         </select>
       </div>
@@ -645,6 +674,70 @@ function openProductForm(id) {
       <div class="full"><label>Nombre del producto</label><input id="pf-name" value="${p ? esc(p.name) : ""}" placeholder="Ej: Jersey Equipo XYZ 2026"></div>
       <div class="full"><label>Descripción</label><textarea id="pf-desc" rows="3">${p ? esc(p.description) : ""}</textarea></div>
     </div>
+
+    <div class="formgrid" id="pf-pad-fields" style="display:none">
+      <div class="full"><label style="margin-bottom:0">Características del pad</label></div>
+      <div><label>Género</label>
+        <select id="pf-pad-gender">
+          <option value="">— sin indicar —</option>
+          ${PAD_GENDER_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_gender === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Densidad de espuma</label>
+        <select id="pf-pad-density">
+          <option value="">— sin indicar —</option>
+          ${PAD_DENSITY_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_density === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Tecnología de espuma</label>
+        <select id="pf-pad-foam">
+          <option value="">— sin indicar —</option>
+          ${PAD_FOAM_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_foam_tech === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Tejido superior (topsheet)</label>
+        <select id="pf-pad-topsheet">
+          <option value="">— sin indicar —</option>
+          ${PAD_TOPSHEET_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_topsheet === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Uso recomendado</label>
+        <select id="pf-pad-usage">
+          <option value="">— sin indicar —</option>
+          ${PAD_USAGE_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_usage === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Grosor (mm)</label><input type="number" id="pf-pad-thickness" min="0" step="0.5" value="${p?.pad_thickness_mm ?? ""}" placeholder="Ej: 8"></div>
+      <div><label>Horas de uso recomendadas</label>
+        <select id="pf-pad-hours">
+          <option value="">— sin indicar —</option>
+          ${PAD_HOURS_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_hours === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Método de fijación</label>
+        <select id="pf-pad-attachment">
+          <option value="">— sin indicar —</option>
+          ${PAD_ATTACHMENT_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_attachment === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="full"><label>Tratamientos</label>
+        <div class="tag-picker" id="pf-pad-treatments">
+          ${PAD_TREATMENT_OPTIONS.map(tag => {
+            const on = p && (p.pad_treatments || []).includes(tag);
+            return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(tag)}" onclick="this.classList.toggle('on')">${esc(tag)}</span>`;
+          }).join("")}
+        </div>
+      </div>
+    </div>
+
+    <div id="pf-bib-pad-link" style="display:none;margin-top:10px">
+      <label>Pad / badana usado</label>
+      <select id="pf-bib-pad">
+        <option value="">— sin pad asignado —</option>
+        ${products.filter(x => x.product_type === "pad" && (!p || x.id !== p.id)).map(pad => `<option value="${pad.id}" ${p?.pad_product_id === pad.id ? "selected" : ""}>${esc(pad.code)} — ${esc(pad.name || "")}</option>`).join("")}
+      </select>
+    </div>
+
     <label>Zonas y telas</label>
     <div class="pfz-list" id="pf-zones"></div>
     <button type="button" class="btn small" onclick="addZoneRow()">+ Agregar zona</button>
@@ -666,6 +759,7 @@ function openProductForm(id) {
   `;
   closeAllModals();
   $("#modal-product-form").classList.add("show");
+  toggleProductTypeFields();
 
   if (id) {
     // load existing zones + sizes + files async
@@ -688,6 +782,13 @@ function openProductForm(id) {
     addZoneRow();
     addSizeRow();
   }
+}
+function toggleProductTypeFields() {
+  const type = $("#pf-type") ? $("#pf-type").value : "";
+  const padFields = $("#pf-pad-fields");
+  const bibLink = $("#pf-bib-pad-link");
+  if (padFields) padFields.style.display = type === "pad" ? "" : "none";
+  if (bibLink) bibLink.style.display = type === "bib" ? "" : "none";
 }
 function quickAddClient() {
   window.__lastCreatedClientId = null;
@@ -802,6 +903,20 @@ async function saveProduct(id) {
       name: $("#pf-name").value.trim(),
       description: $("#pf-desc").value.trim(),
     };
+    if (type === "pad") {
+      payload.pad_gender = $("#pf-pad-gender").value;
+      payload.pad_density = $("#pf-pad-density").value;
+      payload.pad_foam_tech = $("#pf-pad-foam").value;
+      payload.pad_topsheet = $("#pf-pad-topsheet").value;
+      payload.pad_usage = $("#pf-pad-usage").value;
+      const thickness = $("#pf-pad-thickness").value;
+      payload.pad_thickness_mm = thickness ? parseFloat(thickness) : null;
+      payload.pad_hours = $("#pf-pad-hours").value;
+      payload.pad_attachment = $("#pf-pad-attachment").value;
+      payload.pad_treatments = $all("#pf-pad-treatments .tag-opt.on").map(t => t.dataset.tag);
+    } else if (type === "bib") {
+      payload.pad_product_id = $("#pf-bib-pad").value || null;
+    }
     let productId = id, code;
     if (id) {
       const { error } = await sb.from("topstone_products").update(payload).eq("id", id);
@@ -865,6 +980,32 @@ async function openProductDetail(id) {
       ${p.client_name ? `<span class="badge cat-tops">${esc(p.client_name)}</span>` : ""}
     </div>
     ${p.description ? `<p class="small">${esc(p.description)}</p>` : ""}
+    ${p.product_type === "pad" ? `
+    <label>Características del pad</label>
+    <div class="table-wrap" style="margin-bottom:10px">
+      <table>
+        <tbody>
+          <tr><td><b>Género</b></td><td>${esc(p.pad_gender || "—")}</td></tr>
+          <tr><td><b>Densidad de espuma</b></td><td>${esc(p.pad_density || "—")}</td></tr>
+          <tr><td><b>Tecnología de espuma</b></td><td>${esc(p.pad_foam_tech || "—")}</td></tr>
+          <tr><td><b>Tejido superior</b></td><td>${esc(p.pad_topsheet || "—")}</td></tr>
+          <tr><td><b>Uso recomendado</b></td><td>${esc(p.pad_usage || "—")}</td></tr>
+          <tr><td><b>Grosor</b></td><td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td></tr>
+          <tr><td><b>Horas de uso</b></td><td>${esc(p.pad_hours || "—")}</td></tr>
+          <tr><td><b>Fijación</b></td><td>${esc(p.pad_attachment || "—")}</td></tr>
+          <tr><td><b>Tratamientos</b></td><td>${(p.pad_treatments || []).length ? (p.pad_treatments || []).map(esc).join(", ") : "—"}</td></tr>
+        </tbody>
+      </table>
+    </div>` : ""}
+    ${p.product_type === "bib" ? `
+    <label>Pad / badana usado</label>
+    <div class="small" style="margin-bottom:10px">
+      ${(() => {
+        if (!p.pad_product_id) return "Sin pad asignado.";
+        const pad = products.find(x => x.id === p.pad_product_id);
+        return pad ? `<a href="#" onclick="openProductDetail('${pad.id}');return false">${esc(pad.code)} — ${esc(pad.name || "")}</a>` : "Pad asignado (no encontrado).";
+      })()}
+    </div>` : ""}
     <label>Zonas de tela</label>
     <div class="pfz-list">
       ${(zdata || []).map(z => {
