@@ -580,26 +580,36 @@ async function deleteFabric(id) {
 // =====================================================================
 async function loadPads() {
   const body = $("#pad-rows");
-  if (body) body.innerHTML = '<tr><td colspan="7" class="empty">Cargando pads…</td></tr>';
+  if (body) body.innerHTML = '<tr><td colspan="8" class="empty">Cargando pads…</td></tr>';
   const { data, error } = await sb.from("topstone_pads").select("*").order("code");
   if (error) { toast("Error cargando pads: " + error.message, true); return; }
-  pads = data || [];
+  const { data: idata, error: ierr } = await sb.from("topstone_pad_images").select("*").order("sort_order");
+  if (ierr) { toast("Error cargando fotos de pads: " + ierr.message, true); return; }
+  const imgMap = {};
+  (idata || []).forEach(row => {
+    (imgMap[row.pad_id] = imgMap[row.pad_id] || []).push(row.url);
+  });
+  pads = (data || []).map(p => ({ ...p, images: imgMap[p.id] || [] }));
   renderPads();
 }
 function renderPads() {
   const body = $("#pad-rows");
   if (!body) return;
   const q = ($("#pd-search").value || "").toLowerCase();
+  const origin = $("#pd-origin") ? $("#pd-origin").value : "";
   let rows = pads.filter(p => !q || (p.code + " " + p.name + " " + p.brand).toLowerCase().includes(q));
-  if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="empty">Sin pads todavía. Crea el primero con "+ Agregar pad".</td></tr>'; return; }
+  if (origin) rows = rows.filter(p => p.origin === origin);
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="9" class="empty">Sin pads todavía. Crea el primero con "+ Agregar pad".</td></tr>'; return; }
   body.innerHTML = rows.map(p => `
     <tr style="cursor:pointer" onclick="openPadDetail('${p.id}')">
+      <td>${p.images && p.images[0] ? `<img src="${esc(p.images[0])}" style="width:36px;height:36px;object-fit:cover;border-radius:6px">` : ""}</td>
       <td><b style="color:var(--accent2)">${esc(p.code)}</b></td>
       <td>${esc(p.name || "—")}</td>
       <td>${esc(p.brand || "—")}</td>
       <td>${esc(p.pad_gender || "—")}</td>
       <td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td>
       <td>${esc(p.pad_usage || "—")}</td>
+      <td>${p.origin ? `<span class="badge mid">${esc(p.origin)}</span>` : "—"}</td>
       <td onclick="event.stopPropagation()">
         <button class="btn small" onclick="openPadForm('${p.id}')">Editar</button>
         <button class="btn danger small" onclick="deletePad('${p.id}')">Borrar</button>
@@ -614,6 +624,14 @@ function openPadForm(id) {
     <div class="formgrid">
       <div><label>Nombre</label><input id="pd-name" value="${p ? esc(p.name) : ""}" placeholder="Ej: Elastic Interface Road HCS"></div>
       <div><label>Marca</label><input id="pd-brand" value="${p ? esc(p.brand) : "Elastic Interface"}"></div>
+      <div><label>Origen</label>
+        <select id="pd-origin-field">
+          <option value="">— sin indicar —</option>
+          <option value="Doméstico" ${p?.origin === "Doméstico" ? "selected" : ""}>Doméstico</option>
+          <option value="Italiano" ${p?.origin === "Italiano" ? "selected" : ""}>Italiano</option>
+        </select>
+      </div>
+      <div><label>Código de proveedor</label><input id="pd-supplier-code" value="${p ? esc(p.supplier_code || "") : ""}" placeholder="Ej: KD0015"></div>
       <div><label>Género</label>
         <select id="pd-gender">
           <option value="">— sin indicar —</option>
@@ -683,6 +701,8 @@ async function savePad(id) {
     const payload = {
       name: $("#pd-name").value.trim(),
       brand: $("#pd-brand").value.trim(),
+      origin: $("#pd-origin-field").value,
+      supplier_code: $("#pd-supplier-code").value.trim(),
       pad_gender: $("#pd-gender").value,
       pad_density: $("#pd-density").value,
       pad_foam_tech: $("#pd-foam").value,
@@ -719,7 +739,12 @@ function openPadDetail(id) {
   $("#modal-pad-detail-body").innerHTML = `
     <button class="close" onclick="closeAllModals()">×</button>
     <h2>${esc(p.code)} <span style="color:var(--muted);font-weight:400">— ${esc(p.name || "Pad")}</span></h2>
-    ${p.brand ? `<div class="row-meta"><span class="badge mid">${esc(p.brand)}</span></div>` : ""}
+    <div class="row-meta">
+      ${p.brand ? `<span class="badge mid">${esc(p.brand)}</span>` : ""}
+      ${p.origin ? `<span class="badge mid">${esc(p.origin)}</span>` : ""}
+      ${p.supplier_code ? `<span class="badge mid">Prov: ${esc(p.supplier_code)}</span>` : ""}
+    </div>
+    ${(p.images || []).length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">${p.images.map(u => `<img src="${esc(u)}" style="width:160px;border-radius:8px">`).join("")}</div>` : ""}
     ${p.description ? `<p class="small">${esc(p.description)}</p>` : ""}
     <div class="table-wrap" style="margin-bottom:10px">
       <table>

@@ -161,14 +161,19 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
         </div>
         <button class="btn primary" onclick="openPadForm()">+ Agregar pad</button>
       </div>
-      <div class="toolbar" style="grid-template-columns:1fr auto">
+      <div class="toolbar" style="grid-template-columns:1fr auto auto">
         <input id="pd-search" placeholder="Buscar código, nombre, marca…" oninput="renderPads()">
+        <select id="pd-origin" onchange="renderPads()">
+          <option value="">Todo origen</option>
+          <option value="Doméstico">Doméstico</option>
+          <option value="Italiano">Italiano</option>
+        </select>
         <button class="btn small" onclick="loadPads()">↻</button>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Código</th><th>Nombre</th><th>Marca</th><th>Género</th><th>Grosor</th><th>Uso</th><th></th></tr></thead>
-          <tbody id="pad-rows"><tr><td colspan="7" class="empty">Cargando pads…</td></tr></tbody>
+          <thead><tr><th></th><th>Código</th><th>Nombre</th><th>Marca</th><th>Género</th><th>Grosor</th><th>Uso</th><th>Origen</th><th></th></tr></thead>
+          <tbody id="pad-rows"><tr><td colspan="9" class="empty">Cargando pads…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -236,6 +241,6 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
 </div>
 
 <!-- cache-busting: bump ?v= on every future app.js change so browsers/CDN never serve a stale copy -->
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
