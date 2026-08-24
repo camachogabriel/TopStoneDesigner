@@ -235,6 +235,7 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
   <img id="lightbox-img" src="" alt="Foto de tela" onclick="closeLightbox()">
 </div>
 
-<script src="app.js"></script>
+<!-- cache-busting: bump ?v= on every future app.js change so browsers/CDN never serve a stale copy -->
+<script src="app.js?v=6"></script>
 </body>
 </html>
