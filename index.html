@@ -79,7 +79,7 @@ tr:hover td{background:var(--panel2)}
 .kv b{color:var(--muted);font-weight:700}
 .formgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
 .formgrid .full{grid-column:1/-1}
-.zone-row{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
+.zone-row{display:grid;grid-template-columns:.7fr 1.3fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
 .size-row{display:grid;grid-template-columns:.9fr .7fr 1fr 1.6fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
 .color-row{display:grid;grid-template-columns:.6fr 1.2fr 1.2fr 1.4fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--panel2);border-radius:8px}
 .color-input{width:100%;height:38px;padding:2px;border:1px solid var(--line2);border-radius:6px;background:var(--panel);cursor:pointer}
@@ -121,6 +121,7 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
     <div class="brand">Top<span>Stone</span></div>
     <div class="brand-sub">Fabric Selector</div>
     <div class="nav-item active" data-view="telas">🧵 Telas</div>
+    <div class="nav-item" data-view="pads">🍩 Pads</div>
     <div class="nav-item" data-view="productos">🧩 Productos</div>
     <div class="nav-item" data-view="clientes">👤 Clientes</div>
   </div>
@@ -133,7 +134,10 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
           <h1>Catálogo de telas</h1>
           <p>Listado maestro de telas para jerseys, licras y otros. Extraído del catálogo de Tarstone y editable desde aquí.</p>
         </div>
-        <button class="btn primary" onclick="openFabricForm()">+ Agregar tela</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn small" onclick="openFuncManager()">🏷️ Características</button>
+          <button class="btn primary" onclick="openFabricForm()">+ Agregar tela</button>
+        </div>
       </div>
       <div class="stats" id="fabric-stats"></div>
       <div class="toolbar">
@@ -148,12 +152,33 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
       <div class="grid" id="fabric-grid"><div class="empty">Cargando telas…</div></div>
     </div>
 
+    <!-- ================= PADS ================= -->
+    <div class="view" id="view-pads">
+      <div class="pagehead">
+        <div>
+          <h1>Catálogo de pads / badanas</h1>
+          <p>Pads disponibles para usar en bibs, speedsuits y otras prendas — se asignan por zona igual que las telas, no son un producto en sí.</p>
+        </div>
+        <button class="btn primary" onclick="openPadForm()">+ Agregar pad</button>
+      </div>
+      <div class="toolbar" style="grid-template-columns:1fr auto">
+        <input id="pd-search" placeholder="Buscar código, nombre, marca…" oninput="renderPads()">
+        <button class="btn small" onclick="loadPads()">↻</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Código</th><th>Nombre</th><th>Marca</th><th>Género</th><th>Grosor</th><th>Uso</th><th></th></tr></thead>
+          <tbody id="pad-rows"><tr><td colspan="7" class="empty">Cargando pads…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ================= PRODUCTOS ================= -->
     <div class="view" id="view-productos">
       <div class="pagehead">
         <div>
           <h1>Productos personalizados</h1>
-          <p>Crea jerseys, bibs, medias, guantes, chalecos, jackets, casquettes, run shorts y run shirts asignando telas por zona.</p>
+          <p>Crea jerseys, bibs, medias, guantes, chalecos, jackets, casquettes, run shorts, run shirts y speedsuits asignando telas y pads por zona.</p>
         </div>
         <button class="btn primary" onclick="openProductForm()">+ Crear producto</button>
       </div>
@@ -202,6 +227,9 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
 <div class="modal-bg" id="modal-product-form"><div class="modal" id="modal-product-form-body" style="max-width:1080px"></div></div>
 <div class="modal-bg" id="modal-product-detail"><div class="modal" id="modal-product-detail-body" style="max-width:900px"></div></div>
 <div class="modal-bg" id="modal-client-form"><div class="modal" id="modal-client-form-body" style="max-width:520px"></div></div>
+<div class="modal-bg" id="modal-func-manager"><div class="modal" id="modal-func-manager-body" style="max-width:560px"></div></div>
+<div class="modal-bg" id="modal-pad-form"><div class="modal" id="modal-pad-form-body"></div></div>
+<div class="modal-bg" id="modal-pad-detail"><div class="modal" id="modal-pad-detail-body"></div></div>
 <div class="modal-bg lightbox-bg" id="modal-img-lightbox">
   <button class="close" onclick="closeLightbox()">×</button>
   <img id="lightbox-img" src="" alt="Foto de tela" onclick="closeLightbox()">

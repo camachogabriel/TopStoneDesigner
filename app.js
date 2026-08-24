@@ -16,16 +16,20 @@ const PRODUCT_TYPES = [
   { value: "casquette", label: "Casquette" },
   { value: "run_short", label: "Run Short" },
   { value: "run_shirt", label: "Run Shirt" },
-  { value: "pad", label: "Pad / Badana" },
+  { value: "speedsuit", label: "Speedsuit" },
 ];
 
 const SIZE_OPTIONS = ["2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL"];
 const GENDER_OPTIONS = ["Hombre", "Mujer", "Unisex"];
 
-const FABRIC_FUNCTIONS = ["Compresión", "Anti-deslizante / Grip", "Transpirable", "Secado rápido", "Repelente al agua", "Cortaviento", "Térmico / Fleece", "Reflectivo", "UV / UPF", "Grafeno", "Antibacterial", "Seamless / Clean-cut", "Alta elasticidad", "Ligera", "Jacquard / Textura", "Malla / Mesh", "Aero"];
+// fabricFunctions is now DB-backed (topstone_fabric_functions) instead of a hardcoded list,
+// so the user can add/rename/delete characteristics from the UI. Loaded via loadFabricFunctions().
+let fabricFunctions = []; // [{id, name, sort_order}]
 
-// Pad/badana characteristics — terminology based on Elastic Interface's own product literature
-// (chamois-design and long-distance-pad guides at elasticinterface.com)
+// Pad/badana characteristics — used by the Pads catalog (topstone_pads), a peer catalog to
+// Telas: pads are assigned into products by zone (see productZoneRows), not created as products
+// themselves. Terminology based on Elastic Interface's own product literature (chamois-design
+// and long-distance-pad guides at elasticinterface.com).
 const PAD_GENDER_OPTIONS = ["Hombre", "Mujer", "Unisex", "Niño"];
 const PAD_DENSITY_OPTIONS = ["Adaptativa (~80 kg/m³)", "Media (~110 kg/m³)", "Alta / HCS (~200 kg/m³)", "Multi-densidad"];
 const PAD_FOAM_OPTIONS = ["Célula cerrada", "Célula abierta", "Híbrida (HCS: cerrada + abierta)", "Reticulada (sandwich 3 capas)"];
@@ -36,6 +40,7 @@ const PAD_ATTACHMENT_OPTIONS = ["Cosido (sewn-in)", "Termosellado / pegado (bond
 const PAD_TREATMENT_OPTIONS = ["Antibacterial", "Secado rápido", "Control térmico", "Anti-rozadura (wings)"];
 
 let fabrics = [];       // cache: [{...fabric, images:[url,...]}]
+let pads = [];           // cache: [{...pad}] — topstone_pads, assigned into products by zone
 let clients = [];
 let products = [];      // [{...product, client_name, zone_count, file_count}]
 
@@ -140,12 +145,97 @@ function populateFuncFilter() {
   const sel = $("#f-func");
   if (!sel) return;
   const current = sel.value;
+  const known = fabricFunctions.map(f => f.name);
   const found = new Set();
   fabrics.forEach(f => (f.functions || []).forEach(fn => found.add(fn)));
-  // keep the known list first (in a sensible order), then any custom tags found in the data
-  const ordered = FABRIC_FUNCTIONS.filter(fn => found.has(fn)).concat([...found].filter(fn => !FABRIC_FUNCTIONS.includes(fn)).sort());
+  // keep the known list first (in a sensible order), then any custom/orphan tags found in the data
+  const ordered = known.filter(fn => found.has(fn)).concat([...found].filter(fn => !known.includes(fn)).sort());
   sel.innerHTML = '<option value="">Toda característica</option>' + ordered.map(fn => `<option value="${esc(fn)}">${esc(fn)}</option>`).join("");
   sel.value = current;
+}
+
+// =====================================================================
+// FABRIC FUNCTIONS (characteristics) — DB-backed master list
+// =====================================================================
+async function loadFabricFunctions() {
+  const { data, error } = await sb.from("topstone_fabric_functions").select("*").order("sort_order");
+  if (error) { toast("Error cargando características: " + error.message, true); return; }
+  fabricFunctions = data || [];
+}
+function openFuncManager() {
+  renderFuncManager();
+  closeAllModals();
+  $("#modal-func-manager").classList.add("show");
+}
+function closeFuncManager() {
+  closeAllModals();
+  // if the fabric form is open behind it, refresh its tag-picker so new/renamed/deleted
+  // characteristics show up immediately without losing the ones already selected
+  const picker = $("#ff-functions");
+  if (picker) {
+    const onNames = $all("#ff-functions .tag-opt.on").map(t => t.dataset.tag);
+    picker.innerHTML = fabricFunctions.map(fn => {
+      const on = onNames.includes(fn.name);
+      return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(fn.name)}" onclick="this.classList.toggle('on')">${esc(fn.name)}</span>`;
+    }).join("");
+  }
+  populateFuncFilter();
+}
+function renderFuncManager() {
+  $("#modal-func-manager-body").innerHTML = `
+    <button class="close" onclick="closeFuncManager()">×</button>
+    <h2>Características de telas</h2>
+    <div class="hint" style="margin:0 0 10px">Agrega, renombra o elimina las características disponibles (Funcionalidad). Al renombrar, se actualiza en todas las telas que ya la tengan asignada. Al eliminar, se quita de esas telas — la tela en sí no se borra.</div>
+    <div id="func-manager-rows">
+      ${fabricFunctions.map(fn => `
+        <div class="filepill" style="display:flex;gap:6px;align-items:center;width:100%;margin:0 0 6px 0;padding:6px 8px">
+          <input value="${esc(fn.name)}" style="flex:1" id="func-name-${fn.id}" onkeydown="if(event.key==='Enter')renameFabricFunction('${fn.id}')">
+          <button class="btn small" onclick="renameFabricFunction('${fn.id}')">Guardar</button>
+          <button class="btn danger small" onclick="deleteFabricFunction('${fn.id}','${esc(fn.name).replace(/'/g, "\\'")}')">×</button>
+        </div>`).join("") || '<div class="small">Sin características todavía.</div>'}
+    </div>
+    <div style="display:flex;gap:6px;margin-top:12px">
+      <input id="func-new-name" placeholder="Nueva característica (ej: Aero)" style="flex:1" onkeydown="if(event.key==='Enter')addFabricFunction()">
+      <button class="btn primary small" onclick="addFabricFunction()">+ Agregar</button>
+    </div>
+    <div style="margin-top:16px"><button class="btn" onclick="closeFuncManager()">Cerrar</button></div>
+  `;
+}
+async function addFabricFunction() {
+  const input = $("#func-new-name");
+  const name = input.value.trim();
+  if (!name) return;
+  const nextOrder = fabricFunctions.length ? Math.max(...fabricFunctions.map(f => f.sort_order)) + 1 : 0;
+  const { error } = await sb.from("topstone_fabric_functions").insert({ name, sort_order: nextOrder });
+  if (error) { toast(error.code === "23505" ? "Esa característica ya existe" : "Error: " + error.message, true); return; }
+  await loadFabricFunctions();
+  renderFuncManager();
+  toast(`"${name}" agregada ✓`);
+}
+async function renameFabricFunction(id) {
+  const fn = fabricFunctions.find(f => f.id === id);
+  const input = $("#func-name-" + id);
+  const newName = input.value.trim();
+  if (!fn || !newName || newName === fn.name) return;
+  const { error } = await sb.from("topstone_fabric_functions").update({ name: newName }).eq("id", id);
+  if (error) { toast(error.code === "23505" ? "Ya existe una característica con ese nombre" : "Error: " + error.message, true); input.value = fn.name; return; }
+  const { error: cascErr } = await sb.rpc("topstone_rename_fabric_function", { p_old: fn.name, p_new: newName });
+  if (cascErr) toast("Se renombró, pero hubo un error actualizando las telas: " + cascErr.message, true);
+  await loadFabricFunctions();
+  await loadFabrics();
+  renderFuncManager();
+  toast(`Renombrada a "${newName}" ✓`);
+}
+async function deleteFabricFunction(id, name) {
+  if (!confirm(`¿Eliminar "${name}"? Se quitará de todas las telas que la tengan asignada (las telas no se borran).`)) return;
+  const { error: cascErr } = await sb.rpc("topstone_delete_fabric_function", { p_name: name });
+  if (cascErr) { toast("Error: " + cascErr.message, true); return; }
+  const { error } = await sb.from("topstone_fabric_functions").delete().eq("id", id);
+  if (error) { toast("Error: " + error.message, true); return; }
+  await loadFabricFunctions();
+  await loadFabrics();
+  renderFuncManager();
+  toast(`"${name}" eliminada ✓`);
 }
 
 function renderFabricStats() {
@@ -294,11 +384,11 @@ function openFabricForm(id) {
       <div><label>Compresión estimada (1-5)</label><input id="ff-compscore" type="number" min="1" max="5" step="0.1" value="${f?.compression_score ?? ""}"></div>
       <div class="full"><label>Análisis técnico</label><textarea id="ff-analysis" rows="3">${f ? esc(f.technical_analysis) : ""}</textarea></div>
       <div class="full">
-        <label>Funcionalidad</label>
+        <label>Funcionalidad <a href="#" onclick="openFuncManager();return false" style="font-weight:400;font-size:11px;margin-left:8px">⚙ Gestionar características</a></label>
         <div class="tag-picker" id="ff-functions">
-          ${FABRIC_FUNCTIONS.map(tag => {
-            const on = f && (f.functions || []).includes(tag);
-            return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(tag)}" onclick="this.classList.toggle('on')">${esc(tag)}</span>`;
+          ${fabricFunctions.map(fn => {
+            const on = f && (f.functions || []).includes(fn.name);
+            return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(fn.name)}" onclick="this.classList.toggle('on')">${esc(fn.name)}</span>`;
           }).join("")}
         </div>
       </div>
@@ -485,6 +575,186 @@ async function deleteFabric(id) {
 }
 
 // =====================================================================
+// PADS — peer catalog to Telas; assigned into products by zone (like fabrics),
+// not created as products themselves.
+// =====================================================================
+async function loadPads() {
+  const body = $("#pad-rows");
+  if (body) body.innerHTML = '<tr><td colspan="7" class="empty">Cargando pads…</td></tr>';
+  const { data, error } = await sb.from("topstone_pads").select("*").order("code");
+  if (error) { toast("Error cargando pads: " + error.message, true); return; }
+  pads = data || [];
+  renderPads();
+}
+function renderPads() {
+  const body = $("#pad-rows");
+  if (!body) return;
+  const q = ($("#pd-search").value || "").toLowerCase();
+  let rows = pads.filter(p => !q || (p.code + " " + p.name + " " + p.brand).toLowerCase().includes(q));
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="empty">Sin pads todavía. Crea el primero con "+ Agregar pad".</td></tr>'; return; }
+  body.innerHTML = rows.map(p => `
+    <tr style="cursor:pointer" onclick="openPadDetail('${p.id}')">
+      <td><b style="color:var(--accent2)">${esc(p.code)}</b></td>
+      <td>${esc(p.name || "—")}</td>
+      <td>${esc(p.brand || "—")}</td>
+      <td>${esc(p.pad_gender || "—")}</td>
+      <td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td>
+      <td>${esc(p.pad_usage || "—")}</td>
+      <td onclick="event.stopPropagation()">
+        <button class="btn small" onclick="openPadForm('${p.id}')">Editar</button>
+        <button class="btn danger small" onclick="deletePad('${p.id}')">Borrar</button>
+      </td>
+    </tr>`).join("");
+}
+function openPadForm(id) {
+  const p = id ? pads.find(x => x.id === id) : null;
+  $("#modal-pad-form-body").innerHTML = `
+    <button class="close" onclick="closeAllModals()">×</button>
+    <h2>${p ? "Editar pad" : "Agregar pad"}</h2>
+    <div class="formgrid">
+      <div><label>Nombre</label><input id="pd-name" value="${p ? esc(p.name) : ""}" placeholder="Ej: Elastic Interface Road HCS"></div>
+      <div><label>Marca</label><input id="pd-brand" value="${p ? esc(p.brand) : "Elastic Interface"}"></div>
+      <div><label>Género</label>
+        <select id="pd-gender">
+          <option value="">— sin indicar —</option>
+          ${PAD_GENDER_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_gender === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Densidad de espuma</label>
+        <select id="pd-density">
+          <option value="">— sin indicar —</option>
+          ${PAD_DENSITY_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_density === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Tecnología de espuma</label>
+        <select id="pd-foam">
+          <option value="">— sin indicar —</option>
+          ${PAD_FOAM_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_foam_tech === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Tejido superior (topsheet)</label>
+        <select id="pd-topsheet">
+          <option value="">— sin indicar —</option>
+          ${PAD_TOPSHEET_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_topsheet === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Uso recomendado</label>
+        <select id="pd-usage">
+          <option value="">— sin indicar —</option>
+          ${PAD_USAGE_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_usage === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Grosor (mm)</label><input type="number" id="pd-thickness" min="0" step="0.5" value="${p?.pad_thickness_mm ?? ""}" placeholder="Ej: 8"></div>
+      <div><label>Horas de uso recomendadas</label>
+        <select id="pd-hours">
+          <option value="">— sin indicar —</option>
+          ${PAD_HOURS_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_hours === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div><label>Método de fijación</label>
+        <select id="pd-attachment">
+          <option value="">— sin indicar —</option>
+          ${PAD_ATTACHMENT_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_attachment === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="full"><label>Tratamientos</label>
+        <div class="tag-picker" id="pd-treatments">
+          ${PAD_TREATMENT_OPTIONS.map(tag => {
+            const on = p && (p.pad_treatments || []).includes(tag);
+            return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(tag)}" onclick="this.classList.toggle('on')">${esc(tag)}</span>`;
+          }).join("")}
+        </div>
+      </div>
+      <div class="full"><label>Descripción</label><textarea id="pd-desc" rows="3">${p ? esc(p.description) : ""}</textarea></div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:8px">
+      <button class="btn primary" id="pd-save-btn" onclick="savePad('${p ? p.id : ""}')">Guardar pad</button>
+      <button class="btn" onclick="closeAllModals()">Cancelar</button>
+    </div>
+    ${p ? `<div class="hint" style="margin-top:10px">Código: <b>${esc(p.code)}</b></div>` : `<div class="hint" style="margin-top:10px">El código se genera automáticamente al guardar.</div>`}
+  `;
+  closeAllModals();
+  $("#modal-pad-form").classList.add("show");
+}
+async function savePad(id) {
+  const btn = $("#pd-save-btn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Guardando…';
+  try {
+    const thickness = $("#pd-thickness").value;
+    const payload = {
+      name: $("#pd-name").value.trim(),
+      brand: $("#pd-brand").value.trim(),
+      pad_gender: $("#pd-gender").value,
+      pad_density: $("#pd-density").value,
+      pad_foam_tech: $("#pd-foam").value,
+      pad_topsheet: $("#pd-topsheet").value,
+      pad_usage: $("#pd-usage").value,
+      pad_thickness_mm: thickness ? parseFloat(thickness) : null,
+      pad_hours: $("#pd-hours").value,
+      pad_attachment: $("#pd-attachment").value,
+      pad_treatments: $all("#pd-treatments .tag-opt.on").map(t => t.dataset.tag),
+      description: $("#pd-desc").value.trim(),
+    };
+    if (id) {
+      const { error } = await sb.from("topstone_pads").update(payload).eq("id", id);
+      if (error) throw error;
+      toast("Pad guardado ✓");
+    } else {
+      const { data: codeData, error: codeErr } = await sb.rpc("topstone_next_pad_code");
+      if (codeErr) throw codeErr;
+      const { error } = await sb.from("topstone_pads").insert({ ...payload, code: codeData });
+      if (error) throw error;
+      toast(`Pad ${codeData} guardado ✓`);
+    }
+    closeAllModals();
+    await loadPads();
+  } catch (e) {
+    toast("Error: " + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = "Guardar pad";
+  }
+}
+function openPadDetail(id) {
+  const p = pads.find(x => x.id === id);
+  if (!p) return;
+  $("#modal-pad-detail-body").innerHTML = `
+    <button class="close" onclick="closeAllModals()">×</button>
+    <h2>${esc(p.code)} <span style="color:var(--muted);font-weight:400">— ${esc(p.name || "Pad")}</span></h2>
+    ${p.brand ? `<div class="row-meta"><span class="badge mid">${esc(p.brand)}</span></div>` : ""}
+    ${p.description ? `<p class="small">${esc(p.description)}</p>` : ""}
+    <div class="table-wrap" style="margin-bottom:10px">
+      <table>
+        <tbody>
+          <tr><td><b>Género</b></td><td>${esc(p.pad_gender || "—")}</td></tr>
+          <tr><td><b>Densidad de espuma</b></td><td>${esc(p.pad_density || "—")}</td></tr>
+          <tr><td><b>Tecnología de espuma</b></td><td>${esc(p.pad_foam_tech || "—")}</td></tr>
+          <tr><td><b>Tejido superior</b></td><td>${esc(p.pad_topsheet || "—")}</td></tr>
+          <tr><td><b>Uso recomendado</b></td><td>${esc(p.pad_usage || "—")}</td></tr>
+          <tr><td><b>Grosor</b></td><td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td></tr>
+          <tr><td><b>Horas de uso</b></td><td>${esc(p.pad_hours || "—")}</td></tr>
+          <tr><td><b>Fijación</b></td><td>${esc(p.pad_attachment || "—")}</td></tr>
+          <tr><td><b>Tratamientos</b></td><td>${(p.pad_treatments || []).length ? (p.pad_treatments || []).map(esc).join(", ") : "—"}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn primary" onclick="closeAllModals();openPadForm('${p.id}')">Editar</button>
+      <button class="btn danger" onclick="deletePad('${p.id}')">Borrar</button>
+    </div>`;
+  closeAllModals();
+  $("#modal-pad-detail").classList.add("show");
+}
+async function deletePad(id) {
+  const p = pads.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`¿Borrar el pad ${p.code}? Se desvinculará de las zonas de producto que lo usen (esas zonas quedan sin pad asignado).`)) return;
+  const { error } = await sb.from("topstone_pads").delete().eq("id", id);
+  if (error) { toast("Error: " + error.message, true); return; }
+  toast("Pad borrado");
+  closeAllModals();
+  await loadPads();
+}
+
+// =====================================================================
 // CLIENTS
 // =====================================================================
 async function loadClients() {
@@ -658,7 +928,7 @@ function openProductForm(id) {
     <h2>${p ? "Editar producto" : "Crear producto"}</h2>
     <div class="formgrid">
       <div><label>Tipo de prenda *</label>
-        <select id="pf-type" ${p ? "disabled" : ""} onchange="toggleProductTypeFields()">
+        <select id="pf-type" ${p ? "disabled" : ""}>
           ${PRODUCT_TYPES.map(t => `<option value="${t.value}" ${p?.product_type === t.value ? "selected" : ""}>${t.label}</option>`).join("")}
         </select>
       </div>
@@ -675,70 +945,8 @@ function openProductForm(id) {
       <div class="full"><label>Descripción</label><textarea id="pf-desc" rows="3">${p ? esc(p.description) : ""}</textarea></div>
     </div>
 
-    <div class="formgrid" id="pf-pad-fields" style="display:none">
-      <div class="full"><label style="margin-bottom:0">Características del pad</label></div>
-      <div><label>Género</label>
-        <select id="pf-pad-gender">
-          <option value="">— sin indicar —</option>
-          ${PAD_GENDER_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_gender === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
-      </div>
-      <div><label>Densidad de espuma</label>
-        <select id="pf-pad-density">
-          <option value="">— sin indicar —</option>
-          ${PAD_DENSITY_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_density === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
-      </div>
-      <div><label>Tecnología de espuma</label>
-        <select id="pf-pad-foam">
-          <option value="">— sin indicar —</option>
-          ${PAD_FOAM_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_foam_tech === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
-      </div>
-      <div><label>Tejido superior (topsheet)</label>
-        <select id="pf-pad-topsheet">
-          <option value="">— sin indicar —</option>
-          ${PAD_TOPSHEET_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_topsheet === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
-      </div>
-      <div><label>Uso recomendado</label>
-        <select id="pf-pad-usage">
-          <option value="">— sin indicar —</option>
-          ${PAD_USAGE_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_usage === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
-      </div>
-      <div><label>Grosor (mm)</label><input type="number" id="pf-pad-thickness" min="0" step="0.5" value="${p?.pad_thickness_mm ?? ""}" placeholder="Ej: 8"></div>
-      <div><label>Horas de uso recomendadas</label>
-        <select id="pf-pad-hours">
-          <option value="">— sin indicar —</option>
-          ${PAD_HOURS_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_hours === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
-      </div>
-      <div><label>Método de fijación</label>
-        <select id="pf-pad-attachment">
-          <option value="">— sin indicar —</option>
-          ${PAD_ATTACHMENT_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_attachment === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="full"><label>Tratamientos</label>
-        <div class="tag-picker" id="pf-pad-treatments">
-          ${PAD_TREATMENT_OPTIONS.map(tag => {
-            const on = p && (p.pad_treatments || []).includes(tag);
-            return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(tag)}" onclick="this.classList.toggle('on')">${esc(tag)}</span>`;
-          }).join("")}
-        </div>
-      </div>
-    </div>
-
-    <div id="pf-bib-pad-link" style="display:none;margin-top:10px">
-      <label>Pad / badana usado</label>
-      <select id="pf-bib-pad">
-        <option value="">— sin pad asignado —</option>
-        ${products.filter(x => x.product_type === "pad" && (!p || x.id !== p.id)).map(pad => `<option value="${pad.id}" ${p?.pad_product_id === pad.id ? "selected" : ""}>${esc(pad.code)} — ${esc(pad.name || "")}</option>`).join("")}
-      </select>
-    </div>
-
-    <label>Zonas y telas</label>
+    <label>Zonas (telas y pads)</label>
+    <div class="hint" style="margin:0 0 6px">Agrega una fila por cada zona de la prenda. Elige si esa zona usa una tela o un pad, y busca el código o nombre.</div>
     <div class="pfz-list" id="pf-zones"></div>
     <button type="button" class="btn small" onclick="addZoneRow()">+ Agregar zona</button>
 
@@ -759,14 +967,16 @@ function openProductForm(id) {
   `;
   closeAllModals();
   $("#modal-product-form").classList.add("show");
-  toggleProductTypeFields();
 
   if (id) {
     // load existing zones + sizes + files async
     (async () => {
       const { data: zdata } = await sb.from("topstone_product_fabric_zones").select("*").eq("product_id", id).order("sort_order");
       productZoneRows = (zdata || []).map(z => ({
-        fabric_id: z.fabric_id, code: z.fabric_code_snapshot, zone_name: z.zone_name, notes: z.notes || ""
+        item_type: z.item_type || "fabric",
+        fabric_id: z.fabric_id, pad_id: z.pad_id,
+        code: z.item_type === "pad" ? z.pad_code_snapshot : z.fabric_code_snapshot,
+        zone_name: z.zone_name, notes: z.notes || ""
       }));
       const { data: sdata } = await sb.from("topstone_product_sizes").select("*").eq("product_id", id).order("sort_order");
       productSizeRows = (sdata || []).map(s => ({
@@ -782,13 +992,6 @@ function openProductForm(id) {
     addZoneRow();
     addSizeRow();
   }
-}
-function toggleProductTypeFields() {
-  const type = $("#pf-type") ? $("#pf-type").value : "";
-  const padFields = $("#pf-pad-fields");
-  const bibLink = $("#pf-bib-pad-link");
-  if (padFields) padFields.style.display = type === "pad" ? "" : "none";
-  if (bibLink) bibLink.style.display = type === "bib" ? "" : "none";
 }
 function quickAddClient() {
   window.__lastCreatedClientId = null;
@@ -807,25 +1010,42 @@ function quickAddClient() {
   }, 400);
 }
 function renderZoneRows() {
-  $("#pf-zones").innerHTML = productZoneRows.map((z, i) => `
+  $("#pf-zones").innerHTML = productZoneRows.map((z, i) => {
+    const isPad = z.item_type === "pad";
+    const itemName = isPad ? (pads.find(p => p.id === z.pad_id)?.name || "") : (fabrics.find(f => f.id === z.fabric_id)?.name || "");
+    return `
     <div class="zone-row">
+      <div><label style="margin:0 0 3px">Tipo</label>
+        <select onchange="setZoneItemType(${i}, this.value)">
+          <option value="fabric" ${!isPad ? "selected" : ""}>Tela</option>
+          <option value="pad" ${isPad ? "selected" : ""}>Pad</option>
+        </select>
+      </div>
       <div class="autocomplete">
-        <label style="margin:0 0 3px">Tela</label>
-        <input value="${z.code ? esc(z.code + " — " + (fabrics.find(f=>f.id===z.fabric_id)?.name || "")) : ""}"
+        <label style="margin:0 0 3px">${isPad ? "Pad" : "Tela"}</label>
+        <input value="${z.code ? esc(z.code + " — " + itemName) : ""}"
                placeholder="Buscar código o nombre…"
-               oninput="fabricAutocomplete(this, ${i})" onfocus="fabricAutocomplete(this, ${i})">
+               oninput="itemAutocomplete(this, ${i})" onfocus="itemAutocomplete(this, ${i})">
         <div class="ac-list" id="ac-list-${i}"></div>
       </div>
       <div><label style="margin:0 0 3px">Zona / uso</label><input value="${esc(z.zone_name || "")}" placeholder="Ej: Mangas" oninput="productZoneRows[${i}].zone_name=this.value"></div>
       <div><label style="margin:0 0 3px">Notas</label><input value="${esc(z.notes || "")}" oninput="productZoneRows[${i}].notes=this.value"></div>
       <button type="button" class="btn danger small" onclick="removeZoneRow(${i})">×</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 function addZoneRow() {
-  productZoneRows.push({ fabric_id: null, code: "", zone_name: "", notes: "" });
+  productZoneRows.push({ item_type: "fabric", fabric_id: null, pad_id: null, code: "", zone_name: "", notes: "" });
   renderZoneRows();
 }
 function removeZoneRow(i) { productZoneRows.splice(i, 1); renderZoneRows(); }
+function setZoneItemType(i, type) {
+  productZoneRows[i].item_type = type;
+  productZoneRows[i].fabric_id = null;
+  productZoneRows[i].pad_id = null;
+  productZoneRows[i].code = "";
+  renderZoneRows();
+}
 function renderSizeRows() {
   $("#pf-sizes").innerHTML = productSizeRows.map((s, i) => `
     <div class="size-row">
@@ -852,19 +1072,22 @@ function addSizeRow() {
   renderSizeRows();
 }
 function removeSizeRow(i) { productSizeRows.splice(i, 1); renderSizeRows(); }
-function fabricAutocomplete(input, i) {
+function itemAutocomplete(input, i) {
   const q = input.value.toLowerCase();
   const list = $("#ac-list-" + i);
-  const matches = fabrics.filter(f => !q || (f.code + " " + f.name).toLowerCase().includes(q)).slice(0, 30);
-  list.innerHTML = matches.map(f => `<div class="ac-item" onmousedown="selectFabricForZone(${i}, '${f.id}')">${esc(f.code)} — ${esc(f.name)}</div>`).join("") || '<div class="ac-item">Sin resultados</div>';
+  const isPad = productZoneRows[i].item_type === "pad";
+  const source = isPad ? pads : fabrics;
+  const matches = source.filter(x => !q || (x.code + " " + x.name).toLowerCase().includes(q)).slice(0, 30);
+  list.innerHTML = matches.map(x => `<div class="ac-item" onmousedown="selectItemForZone(${i}, '${x.id}')">${esc(x.code)} — ${esc(x.name)}</div>`).join("") || '<div class="ac-item">Sin resultados</div>';
   list.classList.add("show");
   input.onblur = () => setTimeout(() => list.classList.remove("show"), 200);
 }
-function selectFabricForZone(i, fabricId) {
-  const f = fabrics.find(x => x.id === fabricId);
-  if (!f) return;
-  productZoneRows[i].fabric_id = f.id;
-  productZoneRows[i].code = f.code;
+function selectItemForZone(i, itemId) {
+  const isPad = productZoneRows[i].item_type === "pad";
+  const x = (isPad ? pads : fabrics).find(v => v.id === itemId);
+  if (!x) return;
+  if (isPad) { productZoneRows[i].pad_id = x.id; } else { productZoneRows[i].fabric_id = x.id; }
+  productZoneRows[i].code = x.code;
   renderZoneRows();
 }
 function renderExistingFiles() {
@@ -896,27 +1119,13 @@ async function saveProduct(id) {
   const type = $("#pf-type").value;
   const btn = $("#pf-save-btn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Guardando…';
   try {
-    const validZones = productZoneRows.filter(z => z.fabric_id && z.zone_name.trim());
+    const validZones = productZoneRows.filter(z => (z.item_type === "pad" ? z.pad_id : z.fabric_id) && z.zone_name.trim());
     const payload = {
       product_type: type,
       client_id: $("#pf-client").value || null,
       name: $("#pf-name").value.trim(),
       description: $("#pf-desc").value.trim(),
     };
-    if (type === "pad") {
-      payload.pad_gender = $("#pf-pad-gender").value;
-      payload.pad_density = $("#pf-pad-density").value;
-      payload.pad_foam_tech = $("#pf-pad-foam").value;
-      payload.pad_topsheet = $("#pf-pad-topsheet").value;
-      payload.pad_usage = $("#pf-pad-usage").value;
-      const thickness = $("#pf-pad-thickness").value;
-      payload.pad_thickness_mm = thickness ? parseFloat(thickness) : null;
-      payload.pad_hours = $("#pf-pad-hours").value;
-      payload.pad_attachment = $("#pf-pad-attachment").value;
-      payload.pad_treatments = $all("#pf-pad-treatments .tag-opt.on").map(t => t.dataset.tag);
-    } else if (type === "bib") {
-      payload.pad_product_id = $("#pf-bib-pad").value || null;
-    }
     let productId = id, code;
     if (id) {
       const { error } = await sb.from("topstone_products").update(payload).eq("id", id);
@@ -933,10 +1142,15 @@ async function saveProduct(id) {
     // zones: clear + reinsert (simple + reliable)
     await sb.from("topstone_product_fabric_zones").delete().eq("product_id", productId);
     if (validZones.length) {
-      await sb.from("topstone_product_fabric_zones").insert(validZones.map((z, i) => ({
-        product_id: productId, fabric_id: z.fabric_id, fabric_code_snapshot: z.code,
-        zone_name: z.zone_name.trim(), notes: z.notes.trim(), sort_order: i,
-      })));
+      await sb.from("topstone_product_fabric_zones").insert(validZones.map((z, i) => {
+        const isPad = z.item_type === "pad";
+        return {
+          product_id: productId, item_type: isPad ? "pad" : "fabric",
+          fabric_id: isPad ? null : z.fabric_id, pad_id: isPad ? z.pad_id : null,
+          fabric_code_snapshot: isPad ? "" : z.code, pad_code_snapshot: isPad ? z.code : "",
+          zone_name: z.zone_name.trim(), notes: z.notes.trim(), sort_order: i,
+        };
+      }));
     }
     // sizes: clear + reinsert
     const validSizes = productSizeRows.filter(s => s.size && s.quantity > 0);
@@ -980,35 +1194,17 @@ async function openProductDetail(id) {
       ${p.client_name ? `<span class="badge cat-tops">${esc(p.client_name)}</span>` : ""}
     </div>
     ${p.description ? `<p class="small">${esc(p.description)}</p>` : ""}
-    ${p.product_type === "pad" ? `
-    <label>Características del pad</label>
-    <div class="table-wrap" style="margin-bottom:10px">
-      <table>
-        <tbody>
-          <tr><td><b>Género</b></td><td>${esc(p.pad_gender || "—")}</td></tr>
-          <tr><td><b>Densidad de espuma</b></td><td>${esc(p.pad_density || "—")}</td></tr>
-          <tr><td><b>Tecnología de espuma</b></td><td>${esc(p.pad_foam_tech || "—")}</td></tr>
-          <tr><td><b>Tejido superior</b></td><td>${esc(p.pad_topsheet || "—")}</td></tr>
-          <tr><td><b>Uso recomendado</b></td><td>${esc(p.pad_usage || "—")}</td></tr>
-          <tr><td><b>Grosor</b></td><td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td></tr>
-          <tr><td><b>Horas de uso</b></td><td>${esc(p.pad_hours || "—")}</td></tr>
-          <tr><td><b>Fijación</b></td><td>${esc(p.pad_attachment || "—")}</td></tr>
-          <tr><td><b>Tratamientos</b></td><td>${(p.pad_treatments || []).length ? (p.pad_treatments || []).map(esc).join(", ") : "—"}</td></tr>
-        </tbody>
-      </table>
-    </div>` : ""}
-    ${p.product_type === "bib" ? `
-    <label>Pad / badana usado</label>
-    <div class="small" style="margin-bottom:10px">
-      ${(() => {
-        if (!p.pad_product_id) return "Sin pad asignado.";
-        const pad = products.find(x => x.id === p.pad_product_id);
-        return pad ? `<a href="#" onclick="openProductDetail('${pad.id}');return false">${esc(pad.code)} — ${esc(pad.name || "")}</a>` : "Pad asignado (no encontrado).";
-      })()}
-    </div>` : ""}
-    <label>Zonas de tela</label>
+    <label>Zonas (telas y pads)</label>
     <div class="pfz-list">
       ${(zdata || []).map(z => {
+        if (z.item_type === "pad") {
+          const pd = pads.find(x => x.id === z.pad_id);
+          return `<div class="pfz-item">
+            <div style="width:44px;height:44px;background:#0b1219;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px">🧵</div>
+            <div class="zn">${esc(z.zone_name)}</div>
+            <div style="flex:1"><b>${esc(z.pad_code_snapshot)}</b> ${pd ? "— " + esc(pd.name) : ""} <span class="badge mid">Pad</span>${z.notes ? `<div class="small">${esc(z.notes)}</div>` : ""}</div>
+          </div>`;
+        }
         const f = fabrics.find(x => x.id === z.fabric_id);
         return `<div class="pfz-item">
           ${f && f.images[0] ? `<img src="${esc(f.images[0])}">` : '<div style="width:44px;height:44px;background:#0b1219;border-radius:6px"></div>'}
@@ -1050,6 +1246,8 @@ async function deleteProduct(id) {
 
 // ---------- boot ----------
 (async function init() {
+  await loadFabricFunctions();
+  await loadPads();
   await loadClients();
   await loadFabrics();
   await loadProducts();
