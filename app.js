@@ -1079,6 +1079,7 @@ function openEyewearDetail(id) {
             <div><b>${esc(v.variant_code || "—")}</b></div>
             ${v.spec_text ? `<div class="small">${esc(v.spec_text)}</div>` : ""}
             <div class="small">Costo: ${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"} · SRP: ${v.srp_price != null ? "$" + esc(String(v.srp_price)) : "—"}</div>
+            <button class="btn small" style="margin-top:8px;width:100%" onclick="openOrderItemDialog('${v.id}','detail')">🧾 Agregar a la orden</button>
           </div>`).join("")}
       </div>
     </div>
@@ -1160,20 +1161,35 @@ async function saveCompanyProfile() {
 }
 
 // =====================================================================
-// ORDER BUILDER — pick quantities per variant, export a supplier-order XLS
+// ORDER BUILDER — a cart of items added one at a time. "+ Agregar modelo"
+// opens a searchable picker of every model/variant; picking one (or using
+// "Agregar a la orden" from an eyewear model's detail view) opens a small
+// cantidad + nota dialog — Aceptar adds it to the cart. Export the cart as
+// a supplier-order XLS.
 // =====================================================================
-let orderQtys = {}; // variant_id -> qty (kept in memory while the modal is open/reopened)
+let orderItems = {}; // variant_id -> { qty, note }
+let orderItemDialogCtx = null; // { variantId, from: 'picker' | 'detail' }
+
+function variantById(variantId) {
+  for (const e of eyewear) {
+    const v = (e.variants || []).find(x => x.id === variantId);
+    if (v) return { ...v, _model: e };
+  }
+  return null;
+}
+
 function openOrderBuilder() {
   $("#modal-order-builder-body").innerHTML = `
     <button class="close" onclick="closeAllModals()">×</button>
     <h2>Generar pedido</h2>
-    <div class="hint" style="margin-bottom:10px">Indica cantidades por variante y descarga el XLS para enviar al proveedor. El encabezado usa los <a href="#" onclick="closeAllModals();openCompanyProfileForm();return false">datos de la empresa</a>.</div>
+    <div class="hint" style="margin-bottom:10px">Agrega modelos al pedido con "+ Agregar modelo", indica cantidad y nota, y descarga el XLS para enviar al proveedor. El encabezado usa los <a href="#" onclick="closeAllModals();openCompanyProfileForm();return false">datos de la empresa</a>.</div>
     <div class="formgrid" style="margin-bottom:14px">
       <div><label>Fecha del pedido</label><input type="date" id="ob-date" value="${new Date().toISOString().slice(0, 10)}"></div>
     </div>
+    <div style="margin-bottom:10px"><button class="btn primary" onclick="openOrderPicker()">+ Agregar modelo</button></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th></th><th>Serie</th><th>Modelo</th><th>Variante</th><th>Especificación</th><th>Costo</th><th>Cantidad</th><th>Subtotal</th></tr></thead>
+        <thead><tr><th></th><th>Serie</th><th>Modelo</th><th>Variante</th><th>Especificación</th><th>Costo</th><th>Cantidad</th><th>Nota</th><th>Subtotal</th><th></th></tr></thead>
         <tbody id="ob-rows"></tbody>
       </table>
     </div>
@@ -1184,54 +1200,149 @@ function openOrderBuilder() {
     </div>`;
   closeAllModals();
   $("#modal-order-builder").classList.add("show");
-  renderOrderRows();
+  renderOrderCart();
 }
-function renderOrderRows() {
+function renderOrderCart() {
   const body = $("#ob-rows");
   if (!body) return;
-  const rows = [];
-  eyewear.forEach(e => {
-    (e.variants || []).forEach(v => {
-      rows.push(`
-        <tr>
-          <td>${v.image_url ? `<img src="${esc(v.image_url)}" style="width:32px;height:32px;object-fit:cover;border-radius:6px">` : ""}</td>
-          <td>${esc(e.series || "—")}</td>
-          <td>${esc(e.name || "—")}</td>
-          <td>${esc(v.variant_code || "—")}</td>
-          <td class="small">${esc(v.spec_text || "—")}</td>
-          <td>${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"}</td>
-          <td><input type="number" min="0" step="1" value="${orderQtys[v.id] || 0}" style="width:70px" oninput="setOrderQty('${v.id}', this.value)"></td>
-          <td class="ob-subtotal" data-variant="${v.id}">${money((orderQtys[v.id] || 0) * (v.cost_price || 0))}</td>
-        </tr>`);
-    });
+  const ids = Object.keys(orderItems).filter(id => (orderItems[id].qty || 0) > 0);
+  const rows = ids.map(id => {
+    const v = variantById(id);
+    if (!v) return "";
+    const it = orderItems[id];
+    const subtotal = (it.qty || 0) * (v.cost_price || 0);
+    return `
+      <tr>
+        <td>${v.image_url ? `<img src="${esc(v.image_url)}" style="width:32px;height:32px;object-fit:cover;border-radius:6px">` : ""}</td>
+        <td>${esc(v._model.series || "—")}</td>
+        <td>${esc(v._model.name || "—")}</td>
+        <td>${esc(v.variant_code || "—")}</td>
+        <td class="small">${esc(v.spec_text || "—")}</td>
+        <td>${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"}</td>
+        <td>${it.qty}</td>
+        <td class="small">${esc(it.note || "—")}</td>
+        <td class="ob-subtotal" data-variant="${id}">${money(subtotal)}</td>
+        <td style="white-space:nowrap">
+          <button class="btn small" onclick="openOrderItemDialog('${id}','picker')">Editar</button>
+          <button class="btn small danger" onclick="removeOrderItem('${id}')">Quitar</button>
+        </td>
+      </tr>`;
   });
-  body.innerHTML = rows.join("") || '<tr><td colspan="8" class="empty">No hay anteojos cargados todavía.</td></tr>';
+  body.innerHTML = rows.join("") || '<tr><td colspan="10" class="empty">Todavía no agregaste modelos al pedido. Usa "+ Agregar modelo".</td></tr>';
   updateOrderTotal();
 }
 function money(n) { return "$" + (Math.round(n * 100) / 100).toFixed(2); }
-function setOrderQty(variantId, val) {
-  const qty = parseInt(val, 10) || 0;
-  orderQtys[variantId] = qty;
-  const variant = eyewear.flatMap(e => e.variants || []).find(v => v.id === variantId);
-  const cell = document.querySelector(`.ob-subtotal[data-variant="${variantId}"]`);
-  if (cell && variant) cell.textContent = money(qty * (variant.cost_price || 0));
-  updateOrderTotal();
-}
 function updateOrderTotal() {
   let total = 0;
-  eyewear.forEach(e => (e.variants || []).forEach(v => { total += (orderQtys[v.id] || 0) * (v.cost_price || 0); }));
+  Object.keys(orderItems).forEach(id => {
+    const v = variantById(id);
+    if (v) total += (orderItems[id].qty || 0) * (v.cost_price || 0);
+  });
   const el = $("#ob-total");
   if (el) el.textContent = money(total);
 }
-function exportOrderXLS() {
-  const items = [];
+function removeOrderItem(variantId) {
+  delete orderItems[variantId];
+  renderOrderCart();
+}
+
+// --- Picker: searchable list of every model/variant; click one to add ---
+function openOrderPicker() {
+  $("#modal-order-picker-body").innerHTML = `
+    <button class="close" onclick="openOrderBuilder()">×</button>
+    <h2>Agregar modelo al pedido</h2>
+    <input id="op-search" placeholder="Buscar código, modelo, variante…" style="margin-bottom:12px" oninput="renderOrderPickerList()">
+    <div id="op-list" style="display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn" onclick="openOrderBuilder()">← Volver al pedido</button>
+    </div>`;
+  closeAllModals();
+  $("#modal-order-picker").classList.add("show");
+  renderOrderPickerList();
+}
+function renderOrderPickerList() {
+  const list = $("#op-list");
+  if (!list) return;
+  const q = ($("#op-search") ? $("#op-search").value : "").toLowerCase().trim();
+  const rows = [];
   eyewear.forEach(e => {
     (e.variants || []).forEach(v => {
-      const qty = orderQtys[v.id] || 0;
-      if (qty > 0) items.push({ series: e.series, model: e.name, code: v.variant_code, spec: v.spec_text, cost: v.cost_price || 0, qty, subtotal: qty * (v.cost_price || 0) });
+      const hay = `${e.code || ""} ${e.name || ""} ${e.series || ""} ${v.variant_code || ""} ${v.spec_text || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+      const already = orderItems[v.id];
+      rows.push(`
+        <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;cursor:pointer" onclick="openOrderItemDialog('${v.id}','picker')">
+          ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:38px;height:38px;object-fit:cover;border-radius:6px">` : `<div style="width:38px;height:38px;border-radius:6px;background:var(--bg2)"></div>`}
+          <div style="flex:1;min-width:0">
+            <div><b>${esc(e.name || "—")}</b> <span class="small" style="color:var(--muted)">${esc(v.variant_code || "")}</span></div>
+            <div class="small" style="color:var(--muted)">${esc(e.series || "")}${v.spec_text ? " · " + esc(v.spec_text) : ""}</div>
+          </div>
+          <div class="small">${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"}</div>
+          ${already ? `<span class="badge mid">En pedido: ${already.qty}</span>` : ""}
+        </div>`);
     });
   });
-  if (!items.length) { toast("Indica al menos una cantidad mayor a 0", true); return; }
+  list.innerHTML = rows.join("") || '<div class="empty">Sin resultados.</div>';
+}
+
+// --- Cantidad + nota dialog, shared by the picker and the eyewear detail view ---
+function openOrderItemDialog(variantId, from) {
+  const v = variantById(variantId);
+  if (!v) return;
+  orderItemDialogCtx = { variantId, from };
+  const existing = orderItems[variantId];
+  $("#modal-order-item-body").innerHTML = `
+    <button class="close" onclick="cancelOrderItemDialog()">×</button>
+    <h2>Agregar al pedido</h2>
+    <div class="row-meta" style="margin-bottom:10px">
+      ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:44px;height:44px;object-fit:cover;border-radius:8px">` : ""}
+      <div><b>${esc(v._model.name || "—")}</b><div class="small" style="color:var(--muted)">${esc(v.variant_code || "")}${v.spec_text ? " · " + esc(v.spec_text) : ""}</div></div>
+    </div>
+    <div class="formgrid">
+      <div><label>Cantidad</label><input type="number" min="1" step="1" id="oi-qty" value="${existing ? existing.qty : 1}"></div>
+      <div><label>Nota (opcional)</label><input type="text" id="oi-note" value="${existing ? esc(existing.note || "") : ""}" placeholder="Ej. entrega urgente, color alterno, etc."></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn primary" onclick="confirmOrderItem()">Aceptar</button>
+      <button class="btn" onclick="cancelOrderItemDialog()">Cancelar</button>
+    </div>`;
+  closeAllModals();
+  $("#modal-order-item").classList.add("show");
+}
+function confirmOrderItem() {
+  if (!orderItemDialogCtx) return;
+  const { variantId, from } = orderItemDialogCtx;
+  const qty = parseInt($("#oi-qty").value, 10) || 0;
+  if (qty <= 0) { toast("Indica una cantidad mayor a 0", true); return; }
+  const note = ($("#oi-note").value || "").trim();
+  orderItems[variantId] = { qty, note };
+  orderItemDialogCtx = null;
+  toast("Agregado al pedido ✓");
+  if (from === "detail") {
+    closeAllModals();
+  } else {
+    openOrderBuilder();
+  }
+}
+function cancelOrderItemDialog() {
+  const ctx = orderItemDialogCtx;
+  orderItemDialogCtx = null;
+  if (ctx && ctx.from === "detail") {
+    closeAllModals();
+  } else {
+    openOrderPicker();
+  }
+}
+
+function exportOrderXLS() {
+  const items = [];
+  Object.keys(orderItems).forEach(id => {
+    const v = variantById(id);
+    if (!v) return;
+    const it = orderItems[id];
+    if ((it.qty || 0) > 0) items.push({ series: v._model.series, model: v._model.name, code: v.variant_code, spec: v.spec_text, cost: v.cost_price || 0, qty: it.qty, note: it.note || "", subtotal: it.qty * (v.cost_price || 0) });
+  });
+  if (!items.length) { toast("Agrega al menos un modelo al pedido", true); return; }
   const c = companyProfile || {};
   const dateVal = $("#ob-date") ? $("#ob-date").value : new Date().toISOString().slice(0, 10);
   const aoa = [];
@@ -1243,15 +1354,15 @@ function exportOrderXLS() {
   if (c.contact_name) aoa.push(["Contacto:", c.contact_name]);
   aoa.push(["Fecha del pedido:", dateVal]);
   aoa.push([]);
-  aoa.push(["Serie", "Modelo", "Código variante", "Especificación", "Precio costo", "Cantidad", "Subtotal"]);
-  items.forEach(it => aoa.push([it.series, it.model, it.code, it.spec, it.cost, it.qty, it.subtotal]));
+  aoa.push(["Serie", "Modelo", "Código variante", "Especificación", "Precio costo", "Cantidad", "Nota", "Subtotal"]);
+  items.forEach(it => aoa.push([it.series, it.model, it.code, it.spec, it.cost, it.qty, it.note, it.subtotal]));
   aoa.push([]);
   const grandTotal = items.reduce((s, it) => s + it.subtotal, 0);
   const totalUnits = items.reduce((s, it) => s + it.qty, 0);
-  aoa.push(["", "", "", "", "", "Total unidades:", totalUnits]);
-  aoa.push(["", "", "", "", "", "TOTAL:", grandTotal]);
+  aoa.push(["", "", "", "", "Total unidades:", totalUnits, "", ""]);
+  aoa.push(["", "", "", "", "TOTAL:", "", "", grandTotal]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 12 }];
+  ws["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 24 }, { wch: 12 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Pedido");
   XLSX.writeFile(wb, `pedido_anteojos_${dateVal}.xlsx`);
