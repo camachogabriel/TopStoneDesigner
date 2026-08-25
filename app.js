@@ -626,7 +626,7 @@ function renderPads() {
           ${p.origin ? `<span class="badge mid">${esc(p.origin)}</span>` : ""}
           ${genders.map(g => `<span class="badge mid">${esc(g)}</span>`).join("")}
         </div>
-        <div class="small">${esc(p.pad_usage || "—")}${p.pad_thickness_mm != null ? " · " + esc(String(p.pad_thickness_mm)) + " mm" : ""}</div>
+        <div class="small">${(p.pad_usage || []).length ? esc(p.pad_usage.join(", ")) : "—"}${p.pad_thickness_mm != null ? " · " + esc(String(p.pad_thickness_mm)) + " mm" : ""}</div>
       </div>
     </div>`;
   }).join("");
@@ -676,11 +676,14 @@ function openPadForm(id) {
           ${PAD_TOPSHEET_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_topsheet === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
         </select>
       </div>
-      <div><label>Uso recomendado</label>
-        <select id="pd-usage">
-          <option value="">— sin indicar —</option>
-          ${PAD_USAGE_OPTIONS.map(g => `<option value="${esc(g)}" ${p?.pad_usage === g ? "selected" : ""}>${esc(g)}</option>`).join("")}
-        </select>
+      <div class="full"><label>Uso recomendado</label>
+        <div class="hint" style="margin:0 0 6px">Puedes marcar varios — ej. un pad crossover que sirve para ruta, gravel y MTB a la vez.</div>
+        <div class="tag-picker" id="pd-usage">
+          ${PAD_USAGE_OPTIONS.map(tag => {
+            const on = p && (p.pad_usage || []).includes(tag);
+            return `<span class="tag-opt ${on ? "on" : ""}" data-tag="${esc(tag)}" onclick="this.classList.toggle('on')">${esc(tag)}</span>`;
+          }).join("")}
+        </div>
       </div>
       <div><label>Grosor (mm) — si no varía por género</label><input type="number" id="pd-thickness" min="0" step="0.5" value="${p?.pad_thickness_mm ?? ""}" placeholder="Ej: 8"></div>
       <div><label>Horas de uso recomendadas</label>
@@ -766,7 +769,7 @@ async function savePad(id) {
       pad_density: $("#pd-density").value,
       pad_foam_tech: $("#pd-foam").value,
       pad_topsheet: $("#pd-topsheet").value,
-      pad_usage: $("#pd-usage").value,
+      pad_usage: $all("#pd-usage .tag-opt.on").map(t => t.dataset.tag),
       pad_thickness_mm: thickness ? parseFloat(thickness) : null,
       pad_hours: $("#pd-hours").value,
       pad_attachment: $("#pd-attachment").value,
@@ -832,7 +835,7 @@ function openPadDetail(id) {
           <tr><td><b>Densidad de espuma</b></td><td>${esc(p.pad_density || "—")}</td></tr>
           <tr><td><b>Tecnología de espuma</b></td><td>${esc(p.pad_foam_tech || "—")}</td></tr>
           <tr><td><b>Tejido superior</b></td><td>${esc(p.pad_topsheet || "—")}</td></tr>
-          <tr><td><b>Uso recomendado</b></td><td>${esc(p.pad_usage || "—")}</td></tr>
+          <tr><td><b>Uso recomendado</b></td><td>${(p.pad_usage || []).length ? p.pad_usage.map(esc).join(", ") : "—"}</td></tr>
           ${!p.variants.length ? `<tr><td><b>Grosor</b></td><td>${p.pad_thickness_mm != null ? esc(String(p.pad_thickness_mm)) + " mm" : "—"}</td></tr>` : ""}
           <tr><td><b>Horas de uso</b></td><td>${esc(p.pad_hours || "—")}</td></tr>
           <tr><td><b>Fijación</b></td><td>${esc(p.pad_attachment || "—")}</td></tr>
