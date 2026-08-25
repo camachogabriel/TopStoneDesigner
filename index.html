@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TopStone · Fabric Selector</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{
   --bg:#0f1720; --panel:#141e2a; --panel2:#1a2634; --line:#26374a; --line2:#2f4359;
@@ -122,6 +123,7 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
     <div class="brand-sub">Fabric Selector</div>
     <div class="nav-item active" data-view="telas">🧵 Telas</div>
     <div class="nav-item" data-view="pads">🍩 Pads</div>
+    <div class="nav-item" data-view="anteojos">👓 Anteojos</div>
     <div class="nav-item" data-view="productos">🧩 Productos</div>
     <div class="nav-item" data-view="clientes">👤 Clientes</div>
   </div>
@@ -171,6 +173,29 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
         <button class="btn small" onclick="loadPads()">↻</button>
       </div>
       <div class="grid" id="pad-grid"><div class="empty">Cargando pads…</div></div>
+    </div>
+
+    <!-- ================= ANTEOJOS ================= -->
+    <div class="view" id="view-anteojos">
+      <div class="pagehead">
+        <div>
+          <h1>Catálogo de anteojos</h1>
+          <p>Uso interno para armar pedidos al proveedor — cada modelo agrupa sus variantes de color/lente, con su precio costo y SRP.</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn small" onclick="openCompanyProfileForm()">🏢 Datos de la empresa</button>
+          <button class="btn small" onclick="openOrderBuilder()">🧾 Generar pedido</button>
+          <button class="btn primary" onclick="openEyewearForm()">+ Agregar modelo</button>
+        </div>
+      </div>
+      <div class="toolbar" style="grid-template-columns:1fr auto auto">
+        <input id="ey-search" placeholder="Buscar código, modelo, variante…" oninput="renderEyewear()">
+        <select id="ey-series" onchange="renderEyewear()">
+          <option value="">Toda serie</option>
+        </select>
+        <button class="btn small" onclick="loadEyewear()">↻</button>
+      </div>
+      <div class="grid" id="ey-grid"><div class="empty">Cargando anteojos…</div></div>
     </div>
 
     <!-- ================= PRODUCTOS ================= -->
@@ -230,12 +255,16 @@ footer.note{color:var(--muted);font-size:11px;margin-top:20px}
 <div class="modal-bg" id="modal-func-manager"><div class="modal" id="modal-func-manager-body" style="max-width:560px"></div></div>
 <div class="modal-bg" id="modal-pad-form"><div class="modal" id="modal-pad-form-body"></div></div>
 <div class="modal-bg" id="modal-pad-detail"><div class="modal" id="modal-pad-detail-body"></div></div>
+<div class="modal-bg" id="modal-eyewear-form"><div class="modal" id="modal-eyewear-form-body"></div></div>
+<div class="modal-bg" id="modal-eyewear-detail"><div class="modal" id="modal-eyewear-detail-body"></div></div>
+<div class="modal-bg" id="modal-company-profile"><div class="modal" id="modal-company-profile-body" style="max-width:520px"></div></div>
+<div class="modal-bg" id="modal-order-builder"><div class="modal" id="modal-order-builder-body" style="max-width:1080px"></div></div>
 <div class="modal-bg lightbox-bg" id="modal-img-lightbox">
   <button class="close" onclick="closeLightbox()">×</button>
   <img id="lightbox-img" src="" alt="Foto de tela" onclick="closeLightbox()">
 </div>
 
 <!-- cache-busting: bump ?v= on every future app.js change so browsers/CDN never serve a stale copy -->
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

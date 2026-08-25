@@ -4,6 +4,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const BUCKET_FABRICS = "topstone-fabrics";
 const BUCKET_PRODUCTS = "topstone-products";
 const BUCKET_PADS = "topstone-pads";
+const BUCKET_EYEWEAR = "topstone-eyewear";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -42,6 +43,8 @@ const PAD_TREATMENT_OPTIONS = ["Antibacterial", "Secado rápido", "Control térm
 
 let fabrics = [];       // cache: [{...fabric, images:[url,...]}]
 let pads = [];           // cache: [{...pad}] — topstone_pads, assigned into products by zone
+let eyewear = [];        // cache: [{...eyewear model, images:[url,...], variants:[...]}]
+let companyProfile = null;
 let clients = [];
 let products = [];      // [{...product, client_name, zone_count, file_count}]
 
@@ -880,6 +883,382 @@ async function deletePad(id) {
 }
 
 // =====================================================================
+// EYEWEAR (Anteojos) — peer catalog to Pads: model with color/lens variants
+// inside, each variant carrying its own cost/SRP price and photo. Used
+// internally to build supplier orders (see ORDER BUILDER below).
+// =====================================================================
+async function loadEyewear() {
+  const grid = $("#ey-grid");
+  if (grid) grid.innerHTML = '<div class="empty">Cargando anteojos…</div>';
+  const { data, error } = await sb.from("topstone_eyewear").select("*").order("code");
+  if (error) { toast("Error cargando anteojos: " + error.message, true); return; }
+  const { data: idata, error: ierr } = await sb.from("topstone_eyewear_images").select("*").order("sort_order");
+  if (ierr) { toast("Error cargando fotos de anteojos: " + ierr.message, true); return; }
+  const { data: vdata, error: verr } = await sb.from("topstone_eyewear_variants").select("*").order("sort_order");
+  if (verr) { toast("Error cargando variantes de anteojos: " + verr.message, true); return; }
+  const imgMap = {};
+  (idata || []).forEach(row => { (imgMap[row.eyewear_id] = imgMap[row.eyewear_id] || []).push(row.url); });
+  const varMap = {};
+  (vdata || []).forEach(row => { (varMap[row.eyewear_id] = varMap[row.eyewear_id] || []).push(row); });
+  eyewear = (data || []).map(e => ({ ...e, images: imgMap[e.id] || [], variants: varMap[e.id] || [] }));
+  populateEyewearSeriesFilter();
+  renderEyewear();
+}
+function populateEyewearSeriesFilter() {
+  const sel = $("#ey-series");
+  if (!sel) return;
+  const current = sel.value;
+  const series = [...new Set(eyewear.map(e => e.series).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Toda serie</option>' + series.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  sel.value = current;
+}
+function eyewearThumb(e) {
+  if (e.images && e.images[0]) return e.images[0];
+  const withPhoto = (e.variants || []).find(v => v.image_url);
+  return withPhoto ? withPhoto.image_url : "";
+}
+function renderEyewear() {
+  const grid = $("#ey-grid");
+  if (!grid) return;
+  const q = ($("#ey-search").value || "").toLowerCase();
+  const series = $("#ey-series") ? $("#ey-series").value : "";
+  let rows = eyewear.filter(e => {
+    if (series && e.series !== series) return false;
+    if (!q) return true;
+    const hay = [e.code, e.name, e.series, e.brand, ...(e.variants || []).map(v => v.variant_code + " " + v.spec_text)].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+  if (!rows.length) { grid.innerHTML = '<div class="empty">Sin anteojos todavía. Crea el primero con "+ Agregar modelo".</div>'; return; }
+  grid.innerHTML = rows.map(e => {
+    const thumb = eyewearThumb(e);
+    const costs = (e.variants || []).map(v => v.cost_price).filter(v => v != null);
+    const priceRange = costs.length ? (Math.min(...costs) === Math.max(...costs) ? `$${esc(String(Math.min(...costs)))}` : `$${esc(String(Math.min(...costs)))}–$${esc(String(Math.max(...costs)))}`) : "—";
+    return `
+    <div class="card">
+      <div class="thumb" onclick="${thumb ? `openImageLightbox('${esc(thumb)}')` : `openEyewearDetail('${e.id}')`}">${thumb ? `<img loading="lazy" src="${esc(thumb)}">` : '<div class="noimg">Sin imagen</div>'}</div>
+      <div class="body" onclick="openEyewearDetail('${e.id}')">
+        <div class="code">${esc(e.code)}</div>
+        <div class="name">${esc(e.name || "—")}</div>
+        <div class="row-meta">
+          ${e.series ? `<span class="badge mid">${esc(e.series)}</span>` : ""}
+          <span class="badge mid">${(e.variants || []).length} variante${(e.variants || []).length === 1 ? "" : "s"}</span>
+        </div>
+        <div class="small">Costo: ${priceRange}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+let eyVariantRows = []; // [{variant_code, spec_text, cost_price, srp_price, existingUrl, newFile}]
+function openEyewearForm(id) {
+  const e = id ? eyewear.find(x => x.id === id) : null;
+  eyVariantRows = e ? e.variants.map(v => ({
+    variant_code: v.variant_code || "", spec_text: v.spec_text || "",
+    cost_price: v.cost_price ?? "", srp_price: v.srp_price ?? "",
+    existingUrl: v.image_url || "", newFile: null,
+  })) : [];
+  $("#modal-eyewear-form-body").innerHTML = `
+    <button class="close" onclick="closeAllModals()">×</button>
+    <h2>${e ? "Editar modelo" : "Agregar modelo"}</h2>
+    <div class="formgrid">
+      <div><label>Modelo</label><input id="ey-name" value="${e ? esc(e.name) : ""}" placeholder="Ej: Lumina"></div>
+      <div><label>Serie</label><input id="ey-series-field" value="${e ? esc(e.series) : ""}" placeholder="Ej: CYCLING, Running, Youth…" list="ey-series-list">
+        <datalist id="ey-series-list">${[...new Set(eyewear.map(x => x.series).filter(Boolean))].map(s => `<option value="${esc(s)}">`).join("")}</datalist>
+      </div>
+      <div><label>Marca</label><input id="ey-brand" value="${e ? esc(e.brand) : "NSVE"}"></div>
+      <div class="full"><label>Descripción</label><textarea id="ey-desc" rows="2">${e ? esc(e.description) : ""}</textarea></div>
+      <div class="full">
+        <label>Variantes (color / lente)</label>
+        <div class="hint" style="margin:0 0 6px">Cada colorway del modelo con su propio código de proveedor, especificación, precio costo, SRP y foto.</div>
+        <div id="ey-variants"></div>
+        <button type="button" class="btn small" onclick="addEyVariantRow()">+ Agregar variante</button>
+      </div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:8px">
+      <button class="btn primary" id="ey-save-btn" onclick="saveEyewear('${e ? e.id : ""}')">Guardar modelo</button>
+      <button class="btn" onclick="closeAllModals()">Cancelar</button>
+    </div>
+    ${e ? `<div class="hint" style="margin-top:10px">Código: <b>${esc(e.code)}</b></div>` : `<div class="hint" style="margin-top:10px">El código se genera automáticamente al guardar.</div>`}
+  `;
+  closeAllModals();
+  $("#modal-eyewear-form").classList.add("show");
+  renderEyVariantRows();
+}
+function renderEyVariantRows() {
+  const el = $("#ey-variants");
+  if (!el) return;
+  el.innerHTML = eyVariantRows.map((v, i) => `
+    <div class="color-row" style="grid-template-columns:1.2fr 2fr .8fr .8fr auto auto">
+      <div><label style="margin:0 0 3px">Código proveedor *</label><input value="${esc(v.variant_code || "")}" placeholder="Ej: XS60011|TT/PK" oninput="eyVariantRows[${i}].variant_code=this.value"></div>
+      <div><label style="margin:0 0 3px">Especificación</label><input value="${esc(v.spec_text || "")}" placeholder="Color marco / lente, tratamiento…" oninput="eyVariantRows[${i}].spec_text=this.value"></div>
+      <div><label style="margin:0 0 3px">Precio costo</label><input type="number" min="0" step="0.01" value="${v.cost_price ?? ""}" oninput="eyVariantRows[${i}].cost_price=this.value"></div>
+      <div><label style="margin:0 0 3px">SRP</label><input type="number" min="0" step="0.01" value="${v.srp_price ?? ""}" oninput="eyVariantRows[${i}].srp_price=this.value"></div>
+      <div>
+        <label style="margin:0 0 3px">Foto</label>
+        ${v.existingUrl && !v.newFile ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><img src="${esc(v.existingUrl)}" style="width:30px;height:30px;object-fit:cover;border-radius:6px"><button type="button" class="btn danger small" style="padding:2px 6px" onclick="eyVariantRows[${i}].existingUrl='';renderEyVariantRows()">×</button></div>` : ""}
+        <input type="file" accept="image/*" onchange="stageEyVariantImage(${i}, this.files[0])">
+      </div>
+      <button type="button" class="btn danger small" onclick="removeEyVariantRow(${i})">×</button>
+    </div>`).join("") || '<div class="small">Sin variantes agregadas — agrega al menos un colorway.</div>';
+}
+function addEyVariantRow() {
+  eyVariantRows.push({ variant_code: "", spec_text: "", cost_price: "", srp_price: "", existingUrl: "", newFile: null });
+  renderEyVariantRows();
+}
+function removeEyVariantRow(i) { eyVariantRows.splice(i, 1); renderEyVariantRows(); }
+function stageEyVariantImage(i, file) {
+  if (!file) return;
+  eyVariantRows[i].newFile = file;
+  renderEyVariantRows();
+}
+async function saveEyewear(id) {
+  const btn = $("#ey-save-btn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Guardando…';
+  try {
+    const payload = {
+      name: $("#ey-name").value.trim(),
+      series: $("#ey-series-field").value.trim(),
+      brand: $("#ey-brand").value.trim(),
+      description: $("#ey-desc").value.trim(),
+    };
+    let eyewearId = id, code = id ? eyewear.find(x => x.id === id)?.code : null;
+    if (id) {
+      const { error } = await sb.from("topstone_eyewear").update(payload).eq("id", id);
+      if (error) throw error;
+    } else {
+      const { data: codeData, error: codeErr } = await sb.rpc("topstone_next_eyewear_code");
+      if (codeErr) throw codeErr;
+      code = codeData;
+      const { data, error } = await sb.from("topstone_eyewear").insert({ ...payload, code }).select().single();
+      if (error) throw error;
+      eyewearId = data.id;
+    }
+    // variants: clear + reinsert (same pattern as pad gender variants / fabric colors)
+    const validVariants = eyVariantRows.filter(v => v.variant_code.trim());
+    await sb.from("topstone_eyewear_variants").delete().eq("eyewear_id", eyewearId);
+    for (let i = 0; i < validVariants.length; i++) {
+      const v = validVariants[i];
+      let imageUrl = v.existingUrl || "";
+      if (v.newFile) {
+        const path = `${code}/variants/${Date.now()}_${slugFile(v.newFile.name)}`;
+        imageUrl = await uploadFile(BUCKET_EYEWEAR, path, v.newFile);
+      }
+      const { error: varErr } = await sb.from("topstone_eyewear_variants").insert({
+        eyewear_id: eyewearId, variant_code: v.variant_code.trim(), spec_text: (v.spec_text || "").trim(),
+        cost_price: v.cost_price !== "" ? parseFloat(v.cost_price) : null,
+        srp_price: v.srp_price !== "" ? parseFloat(v.srp_price) : null,
+        sort_order: i, image_url: imageUrl,
+      });
+      if (varErr) throw varErr;
+    }
+    toast(`Modelo ${code} guardado ✓`);
+    closeAllModals();
+    await loadEyewear();
+  } catch (e2) {
+    toast("Error: " + e2.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = "Guardar modelo";
+  }
+}
+function openEyewearDetail(id) {
+  const e = eyewear.find(x => x.id === id);
+  if (!e) return;
+  $("#modal-eyewear-detail-body").innerHTML = `
+    <button class="close" onclick="closeAllModals()">×</button>
+    <h2>${esc(e.code)} <span style="color:var(--muted);font-weight:400">— ${esc(e.name || "Modelo")}</span></h2>
+    <div class="row-meta">
+      ${e.series ? `<span class="badge mid">${esc(e.series)}</span>` : ""}
+      ${e.brand ? `<span class="badge mid">${esc(e.brand)}</span>` : ""}
+    </div>
+    ${(e.images || []).length ? `<div class="gallery">${e.images.map(u => `<img src="${esc(u)}" onclick="openImageLightbox('${esc(u)}')">`).join("")}</div>` : ""}
+    ${e.description ? `<p class="small">${esc(e.description)}</p>` : ""}
+    <div style="margin-bottom:10px">
+      <div class="small" style="margin-bottom:6px"><b>Variantes (${(e.variants || []).length})</b></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${(e.variants || []).map(v => `
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px;min-width:170px">
+            ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:100%;max-width:150px;border-radius:8px;cursor:pointer;margin-bottom:6px" onclick="openImageLightbox('${esc(v.image_url)}')">` : ""}
+            <div><b>${esc(v.variant_code || "—")}</b></div>
+            ${v.spec_text ? `<div class="small">${esc(v.spec_text)}</div>` : ""}
+            <div class="small">Costo: ${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"} · SRP: ${v.srp_price != null ? "$" + esc(String(v.srp_price)) : "—"}</div>
+          </div>`).join("")}
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn primary" onclick="closeAllModals();openEyewearForm('${e.id}')">Editar</button>
+      <button class="btn danger" onclick="deleteEyewear('${e.id}')">Borrar</button>
+    </div>`;
+  closeAllModals();
+  $("#modal-eyewear-detail").classList.add("show");
+}
+async function deleteEyewear(id) {
+  const e = eyewear.find(x => x.id === id);
+  if (!e) return;
+  if (!confirm(`¿Borrar el modelo ${e.code}? Se borrarán todas sus variantes y fotos.`)) return;
+  try {
+    for (const url of e.images) await removeStorageObject(BUCKET_EYEWEAR, url);
+    for (const v of e.variants) if (v.image_url) await removeStorageObject(BUCKET_EYEWEAR, v.image_url);
+    const { error } = await sb.from("topstone_eyewear").delete().eq("id", id);
+    if (error) throw error;
+    toast("Modelo borrado");
+    closeAllModals();
+    await loadEyewear();
+  } catch (err) { toast("Error: " + err.message, true); }
+}
+
+// =====================================================================
+// COMPANY PROFILE — editable header used on order (pedido) XLS exports
+// =====================================================================
+async function loadCompanyProfile() {
+  const { data, error } = await sb.from("topstone_company_profile").select("*").eq("id", "default").maybeSingle();
+  if (error) { toast("Error cargando datos de empresa: " + error.message, true); return; }
+  companyProfile = data || { id: "default", company_name: "", tax_id: "", address: "", phone: "", email: "", contact_name: "", notes: "" };
+}
+function openCompanyProfileForm() {
+  const c = companyProfile || {};
+  $("#modal-company-profile-body").innerHTML = `
+    <button class="close" onclick="closeAllModals()">×</button>
+    <h2>Datos de la empresa</h2>
+    <div class="hint" style="margin-bottom:10px">Este encabezado se usa al generar el XLS de pedidos.</div>
+    <div class="formgrid">
+      <div class="full"><label>Nombre de la empresa</label><input id="cp-name" value="${esc(c.company_name || "")}"></div>
+      <div><label>RFC / Tax ID</label><input id="cp-tax" value="${esc(c.tax_id || "")}"></div>
+      <div><label>Teléfono</label><input id="cp-phone" value="${esc(c.phone || "")}"></div>
+      <div class="full"><label>Dirección</label><input id="cp-address" value="${esc(c.address || "")}"></div>
+      <div><label>Email</label><input id="cp-email" value="${esc(c.email || "")}"></div>
+      <div><label>Persona de contacto</label><input id="cp-contact" value="${esc(c.contact_name || "")}"></div>
+      <div class="full"><label>Notas</label><textarea id="cp-notes" rows="2">${esc(c.notes || "")}</textarea></div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:8px">
+      <button class="btn primary" id="cp-save-btn" onclick="saveCompanyProfile()">Guardar</button>
+      <button class="btn" onclick="closeAllModals()">Cancelar</button>
+    </div>`;
+  closeAllModals();
+  $("#modal-company-profile").classList.add("show");
+}
+async function saveCompanyProfile() {
+  const btn = $("#cp-save-btn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Guardando…';
+  try {
+    const payload = {
+      id: "default",
+      company_name: $("#cp-name").value.trim(),
+      tax_id: $("#cp-tax").value.trim(),
+      address: $("#cp-address").value.trim(),
+      phone: $("#cp-phone").value.trim(),
+      email: $("#cp-email").value.trim(),
+      contact_name: $("#cp-contact").value.trim(),
+      notes: $("#cp-notes").value.trim(),
+    };
+    const { error } = await sb.from("topstone_company_profile").upsert(payload);
+    if (error) throw error;
+    companyProfile = payload;
+    toast("Datos de la empresa guardados ✓");
+    closeAllModals();
+  } catch (e) {
+    toast("Error: " + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = "Guardar";
+  }
+}
+
+// =====================================================================
+// ORDER BUILDER — pick quantities per variant, export a supplier-order XLS
+// =====================================================================
+let orderQtys = {}; // variant_id -> qty (kept in memory while the modal is open/reopened)
+function openOrderBuilder() {
+  $("#modal-order-builder-body").innerHTML = `
+    <button class="close" onclick="closeAllModals()">×</button>
+    <h2>Generar pedido</h2>
+    <div class="hint" style="margin-bottom:10px">Indica cantidades por variante y descarga el XLS para enviar al proveedor. El encabezado usa los <a href="#" onclick="closeAllModals();openCompanyProfileForm();return false">datos de la empresa</a>.</div>
+    <div class="formgrid" style="margin-bottom:14px">
+      <div><label>Fecha del pedido</label><input type="date" id="ob-date" value="${new Date().toISOString().slice(0, 10)}"></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Serie</th><th>Modelo</th><th>Variante</th><th>Especificación</th><th>Costo</th><th>Cantidad</th><th>Subtotal</th></tr></thead>
+        <tbody id="ob-rows"></tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin:14px 0;font-size:16px"><b>Total: <span id="ob-total">$0.00</span></b></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" onclick="exportOrderXLS()">⬇ Descargar XLS</button>
+      <button class="btn" onclick="closeAllModals()">Cerrar</button>
+    </div>`;
+  closeAllModals();
+  $("#modal-order-builder").classList.add("show");
+  renderOrderRows();
+}
+function renderOrderRows() {
+  const body = $("#ob-rows");
+  if (!body) return;
+  const rows = [];
+  eyewear.forEach(e => {
+    (e.variants || []).forEach(v => {
+      rows.push(`
+        <tr>
+          <td>${v.image_url ? `<img src="${esc(v.image_url)}" style="width:32px;height:32px;object-fit:cover;border-radius:6px">` : ""}</td>
+          <td>${esc(e.series || "—")}</td>
+          <td>${esc(e.name || "—")}</td>
+          <td>${esc(v.variant_code || "—")}</td>
+          <td class="small">${esc(v.spec_text || "—")}</td>
+          <td>${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"}</td>
+          <td><input type="number" min="0" step="1" value="${orderQtys[v.id] || 0}" style="width:70px" oninput="setOrderQty('${v.id}', this.value)"></td>
+          <td class="ob-subtotal" data-variant="${v.id}">${money((orderQtys[v.id] || 0) * (v.cost_price || 0))}</td>
+        </tr>`);
+    });
+  });
+  body.innerHTML = rows.join("") || '<tr><td colspan="8" class="empty">No hay anteojos cargados todavía.</td></tr>';
+  updateOrderTotal();
+}
+function money(n) { return "$" + (Math.round(n * 100) / 100).toFixed(2); }
+function setOrderQty(variantId, val) {
+  const qty = parseInt(val, 10) || 0;
+  orderQtys[variantId] = qty;
+  const variant = eyewear.flatMap(e => e.variants || []).find(v => v.id === variantId);
+  const cell = document.querySelector(`.ob-subtotal[data-variant="${variantId}"]`);
+  if (cell && variant) cell.textContent = money(qty * (variant.cost_price || 0));
+  updateOrderTotal();
+}
+function updateOrderTotal() {
+  let total = 0;
+  eyewear.forEach(e => (e.variants || []).forEach(v => { total += (orderQtys[v.id] || 0) * (v.cost_price || 0); }));
+  const el = $("#ob-total");
+  if (el) el.textContent = money(total);
+}
+function exportOrderXLS() {
+  const items = [];
+  eyewear.forEach(e => {
+    (e.variants || []).forEach(v => {
+      const qty = orderQtys[v.id] || 0;
+      if (qty > 0) items.push({ series: e.series, model: e.name, code: v.variant_code, spec: v.spec_text, cost: v.cost_price || 0, qty, subtotal: qty * (v.cost_price || 0) });
+    });
+  });
+  if (!items.length) { toast("Indica al menos una cantidad mayor a 0", true); return; }
+  const c = companyProfile || {};
+  const dateVal = $("#ob-date") ? $("#ob-date").value : new Date().toISOString().slice(0, 10);
+  const aoa = [];
+  aoa.push([c.company_name || "(sin nombre de empresa — configúralo en 'Datos de la empresa')"]);
+  if (c.tax_id) aoa.push(["RFC / Tax ID:", c.tax_id]);
+  if (c.address) aoa.push(["Dirección:", c.address]);
+  if (c.phone) aoa.push(["Teléfono:", c.phone]);
+  if (c.email) aoa.push(["Email:", c.email]);
+  if (c.contact_name) aoa.push(["Contacto:", c.contact_name]);
+  aoa.push(["Fecha del pedido:", dateVal]);
+  aoa.push([]);
+  aoa.push(["Serie", "Modelo", "Código variante", "Especificación", "Precio costo", "Cantidad", "Subtotal"]);
+  items.forEach(it => aoa.push([it.series, it.model, it.code, it.spec, it.cost, it.qty, it.subtotal]));
+  aoa.push([]);
+  const grandTotal = items.reduce((s, it) => s + it.subtotal, 0);
+  const totalUnits = items.reduce((s, it) => s + it.qty, 0);
+  aoa.push(["", "", "", "", "", "Total unidades:", totalUnits]);
+  aoa.push(["", "", "", "", "", "TOTAL:", grandTotal]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 12 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Pedido");
+  XLSX.writeFile(wb, `pedido_anteojos_${dateVal}.xlsx`);
+  toast("XLS generado ✓");
+}
+
+// =====================================================================
 // CLIENTS
 // =====================================================================
 async function loadClients() {
@@ -1373,6 +1752,8 @@ async function deleteProduct(id) {
 (async function init() {
   await loadFabricFunctions();
   await loadPads();
+  await loadEyewear();
+  await loadCompanyProfile();
   await loadClients();
   await loadFabrics();
   await loadProducts();
