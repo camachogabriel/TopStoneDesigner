@@ -1210,11 +1210,15 @@ function renderOrderList() {
   const rows = [];
   eyewear.forEach(e => {
     (e.variants || []).forEach(v => {
-      const hay = `${e.code || ""} ${e.name || ""} ${e.series || ""} ${v.variant_code || ""} ${v.spec_text || ""}`.toLowerCase();
-      if (q && !hay.includes(q)) return;
       const it = orderItems[v.id];
       const qty = it ? it.qty : 0;
       const note = it ? (it.note || "") : "";
+      if (q) {
+        const hay = `${e.code || ""} ${e.name || ""} ${e.series || ""} ${v.variant_code || ""} ${v.spec_text || ""}`.toLowerCase();
+        if (!hay.includes(q)) return;
+      } else if (qty <= 0) {
+        return; // sin búsqueda activa: solo mostramos lo que ya está en el pedido
+      }
       rows.push(`
         <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;flex-wrap:wrap">
           ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex:none;cursor:pointer" onclick="openImageLightbox('${esc(v.image_url)}')">` : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg2);flex:none"></div>`}
@@ -1230,7 +1234,9 @@ function renderOrderList() {
         </div>`);
     });
   });
-  list.innerHTML = rows.join("") || '<div class="empty">No hay anteojos cargados todavía.</div>';
+  list.innerHTML = rows.join("") || (q
+    ? '<div class="empty">Sin resultados.</div>'
+    : '<div class="empty">Todavía no agregaste modelos. Usa el buscador para encontrar uno y ponerle cantidad.</div>');
   updateOrderTotal();
 }
 function money(n) { return "$" + (Math.round(n * 100) / 100).toFixed(2); }
