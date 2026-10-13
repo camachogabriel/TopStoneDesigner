@@ -1217,7 +1217,7 @@ function renderOrderList() {
       const note = it ? (it.note || "") : "";
       rows.push(`
         <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;flex-wrap:wrap">
-          ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex:none">` : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg2);flex:none"></div>`}
+          ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex:none;cursor:pointer" onclick="openImageLightbox('${esc(v.image_url)}')">` : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg2);flex:none"></div>`}
           <div style="flex:1;min-width:160px">
             <div><b>${esc(e.name || "—")}</b> <span class="small" style="color:var(--muted)">${esc(v.variant_code || "")}</span></div>
             <div class="small" style="color:var(--muted)">${esc(e.series || "")}${v.spec_text ? " · " + esc(v.spec_text) : ""}</div>
