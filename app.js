@@ -1071,16 +1071,20 @@ function openEyewearDetail(id) {
     ${(e.images || []).length ? `<div class="gallery">${e.images.map(u => `<img src="${esc(u)}" onclick="openImageLightbox('${esc(u)}')">`).join("")}</div>` : ""}
     ${e.description ? `<p class="small">${esc(e.description)}</p>` : ""}
     <div style="margin-bottom:10px">
-      <div class="small" style="margin-bottom:6px"><b>Variantes (${(e.variants || []).length})</b></div>
+      <div class="small" style="margin-bottom:6px"><b>Variantes (${(e.variants || []).length})</b> · <a href="#" onclick="closeAllModals();openOrderBuilder();return false">🧾 Ver pedido completo</a></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        ${(e.variants || []).map(v => `
+        ${(e.variants || []).map(v => { const it = orderItems[v.id]; return `
           <div style="border:1px solid var(--border);border-radius:10px;padding:10px;min-width:170px">
             ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:100%;max-width:150px;border-radius:8px;cursor:pointer;margin-bottom:6px" onclick="openImageLightbox('${esc(v.image_url)}')">` : ""}
             <div><b>${esc(v.variant_code || "—")}</b></div>
             ${v.spec_text ? `<div class="small">${esc(v.spec_text)}</div>` : ""}
             <div class="small">Costo: ${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"} · SRP: ${v.srp_price != null ? "$" + esc(String(v.srp_price)) : "—"}</div>
-            <button class="btn small" style="margin-top:8px;width:100%" onclick="openOrderItemDialog('${v.id}','detail')">🧾 Agregar a la orden</button>
-          </div>`).join("")}
+            <div style="margin-top:8px;display:flex;gap:6px">
+              <input type="number" min="0" step="1" placeholder="Cant." value="${it ? it.qty : ""}" style="width:64px" oninput="setOrderItemQty('${v.id}', this.value)">
+              <input type="text" placeholder="Nota (opcional)" value="${it ? esc(it.note || "") : ""}" style="flex:1;min-width:0" oninput="setOrderItemNote('${v.id}', this.value)">
+            </div>
+            <div class="small" id="oi-status-${v.id}" style="margin-top:4px;color:var(--muted)">${it && it.qty > 0 ? `En el pedido: ${it.qty}` : ""}</div>
+          </div>`; }).join("")}
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:16px">
@@ -1161,14 +1165,16 @@ async function saveCompanyProfile() {
 }
 
 // =====================================================================
-// ORDER BUILDER — a cart of items added one at a time. "+ Agregar modelo"
-// opens a searchable picker of every model/variant; picking one (or using
-// "Agregar a la orden" from an eyewear model's detail view) opens a small
-// cantidad + nota dialog — Aceptar adds it to the cart. Export the cart as
-// a supplier-order XLS.
+// ORDER BUILDER — one continuous, searchable list of every model/variant,
+// each row with its own cantidad + nota inputs wired directly to the cart
+// (orderItems) — editing a row updates the cart instantly, no separate
+// add dialog or screen to leave and come back to. The same cantidad/nota
+// inputs also appear inline on each variant inside the eyewear detail view
+// (openEyewearDetail), sharing the same setOrderItemQty/setOrderItemNote
+// functions, so adding from there updates the same cart live. Export the
+// cart (rows with cantidad > 0) as a supplier-order XLS.
 // =====================================================================
 let orderItems = {}; // variant_id -> { qty, note }
-let orderItemDialogCtx = null; // { variantId, from: 'picker' | 'detail' }
 
 function variantById(variantId) {
   for (const e of eyewear) {
@@ -1182,53 +1188,49 @@ function openOrderBuilder() {
   $("#modal-order-builder-body").innerHTML = `
     <button class="close" onclick="closeAllModals()">×</button>
     <h2>Generar pedido</h2>
-    <div class="hint" style="margin-bottom:10px">Agrega modelos al pedido con "+ Agregar modelo", indica cantidad y nota, y descarga el XLS para enviar al proveedor. El encabezado usa los <a href="#" onclick="closeAllModals();openCompanyProfileForm();return false">datos de la empresa</a>.</div>
-    <div class="formgrid" style="margin-bottom:14px">
+    <div class="hint" style="margin-bottom:10px">Indica cantidad (y nota, opcional) junto a cada modelo/variante — queda agregado al pedido al instante. El encabezado usa los <a href="#" onclick="closeAllModals();openCompanyProfileForm();return false">datos de la empresa</a>.</div>
+    <div class="formgrid" style="margin-bottom:10px">
       <div><label>Fecha del pedido</label><input type="date" id="ob-date" value="${new Date().toISOString().slice(0, 10)}"></div>
     </div>
-    <div style="margin-bottom:10px"><button class="btn primary" onclick="openOrderPicker()">+ Agregar modelo</button></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th></th><th>Serie</th><th>Modelo</th><th>Variante</th><th>Especificación</th><th>Costo</th><th>Cantidad</th><th>Nota</th><th>Subtotal</th><th></th></tr></thead>
-        <tbody id="ob-rows"></tbody>
-      </table>
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin:14px 0;font-size:16px"><b>Total: <span id="ob-total">$0.00</span></b></div>
+    <input id="ob-search" placeholder="Buscar código, modelo, variante…" style="margin-bottom:10px" oninput="renderOrderList()">
+    <div id="ob-list" style="display:flex;flex-direction:column;gap:8px;max-height:430px;overflow:auto;margin-bottom:10px"></div>
+    <div style="display:flex;justify-content:flex-end;margin:10px 0;font-size:16px"><b>Total: <span id="ob-total">$0.00</span></b></div>
     <div style="display:flex;gap:8px">
       <button class="btn primary" onclick="exportOrderXLS()">⬇ Descargar XLS</button>
       <button class="btn" onclick="closeAllModals()">Cerrar</button>
     </div>`;
   closeAllModals();
   $("#modal-order-builder").classList.add("show");
-  renderOrderCart();
+  renderOrderList();
 }
-function renderOrderCart() {
-  const body = $("#ob-rows");
-  if (!body) return;
-  const ids = Object.keys(orderItems).filter(id => (orderItems[id].qty || 0) > 0);
-  const rows = ids.map(id => {
-    const v = variantById(id);
-    if (!v) return "";
-    const it = orderItems[id];
-    const subtotal = (it.qty || 0) * (v.cost_price || 0);
-    return `
-      <tr>
-        <td>${v.image_url ? `<img src="${esc(v.image_url)}" style="width:32px;height:32px;object-fit:cover;border-radius:6px">` : ""}</td>
-        <td>${esc(v._model.series || "—")}</td>
-        <td>${esc(v._model.name || "—")}</td>
-        <td>${esc(v.variant_code || "—")}</td>
-        <td class="small">${esc(v.spec_text || "—")}</td>
-        <td>${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"}</td>
-        <td>${it.qty}</td>
-        <td class="small">${esc(it.note || "—")}</td>
-        <td class="ob-subtotal" data-variant="${id}">${money(subtotal)}</td>
-        <td style="white-space:nowrap">
-          <button class="btn small" onclick="openOrderItemDialog('${id}','picker')">Editar</button>
-          <button class="btn small danger" onclick="removeOrderItem('${id}')">Quitar</button>
-        </td>
-      </tr>`;
+function renderOrderList() {
+  const list = $("#ob-list");
+  if (!list) return;
+  const q = ($("#ob-search") ? $("#ob-search").value : "").toLowerCase().trim();
+  const rows = [];
+  eyewear.forEach(e => {
+    (e.variants || []).forEach(v => {
+      const hay = `${e.code || ""} ${e.name || ""} ${e.series || ""} ${v.variant_code || ""} ${v.spec_text || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+      const it = orderItems[v.id];
+      const qty = it ? it.qty : 0;
+      const note = it ? (it.note || "") : "";
+      rows.push(`
+        <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;flex-wrap:wrap">
+          ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex:none">` : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg2);flex:none"></div>`}
+          <div style="flex:1;min-width:160px">
+            <div><b>${esc(e.name || "—")}</b> <span class="small" style="color:var(--muted)">${esc(v.variant_code || "")}</span></div>
+            <div class="small" style="color:var(--muted)">${esc(e.series || "")}${v.spec_text ? " · " + esc(v.spec_text) : ""}</div>
+          </div>
+          <div class="small" style="width:56px;flex:none">${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"}</div>
+          <input type="number" min="0" step="1" placeholder="Cant." value="${qty || ""}" style="width:64px;flex:none" oninput="setOrderItemQty('${v.id}', this.value)">
+          <input type="text" placeholder="Nota" value="${esc(note)}" style="width:150px;flex:none" oninput="setOrderItemNote('${v.id}', this.value)">
+          <div class="small ob-subtotal" data-variant="${v.id}" style="width:66px;flex:none;text-align:right">${money(qty * (v.cost_price || 0))}</div>
+          <button class="btn small" style="flex:none" onclick="clearOrderItem('${v.id}')" title="Quitar del pedido">✕</button>
+        </div>`);
+    });
   });
-  body.innerHTML = rows.join("") || '<tr><td colspan="10" class="empty">Todavía no agregaste modelos al pedido. Usa "+ Agregar modelo".</td></tr>';
+  list.innerHTML = rows.join("") || '<div class="empty">No hay anteojos cargados todavía.</div>';
   updateOrderTotal();
 }
 function money(n) { return "$" + (Math.round(n * 100) / 100).toFixed(2); }
@@ -1241,97 +1243,33 @@ function updateOrderTotal() {
   const el = $("#ob-total");
   if (el) el.textContent = money(total);
 }
-function removeOrderItem(variantId) {
+function setOrderItemQty(variantId, val) {
+  const qty = parseInt(val, 10) || 0;
+  if (!orderItems[variantId]) orderItems[variantId] = { qty: 0, note: "" };
+  orderItems[variantId].qty = qty;
+  if (qty <= 0 && !orderItems[variantId].note) delete orderItems[variantId];
+  refreshOrderUI(variantId);
+}
+function setOrderItemNote(variantId, val) {
+  const note = val || "";
+  if (!orderItems[variantId]) orderItems[variantId] = { qty: 0, note: "" };
+  orderItems[variantId].note = note;
+  if ((orderItems[variantId].qty || 0) <= 0 && !note) delete orderItems[variantId];
+  refreshOrderUI(variantId);
+}
+function clearOrderItem(variantId) {
   delete orderItems[variantId];
-  renderOrderCart();
+  if ($("#ob-list")) renderOrderList(); else refreshOrderUI(variantId);
 }
-
-// --- Picker: searchable list of every model/variant; click one to add ---
-function openOrderPicker() {
-  $("#modal-order-picker-body").innerHTML = `
-    <button class="close" onclick="openOrderBuilder()">×</button>
-    <h2>Agregar modelo al pedido</h2>
-    <input id="op-search" placeholder="Buscar código, modelo, variante…" style="margin-bottom:12px" oninput="renderOrderPickerList()">
-    <div id="op-list" style="display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto"></div>
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button class="btn" onclick="openOrderBuilder()">← Volver al pedido</button>
-    </div>`;
-  closeAllModals();
-  $("#modal-order-picker").classList.add("show");
-  renderOrderPickerList();
-}
-function renderOrderPickerList() {
-  const list = $("#op-list");
-  if (!list) return;
-  const q = ($("#op-search") ? $("#op-search").value : "").toLowerCase().trim();
-  const rows = [];
-  eyewear.forEach(e => {
-    (e.variants || []).forEach(v => {
-      const hay = `${e.code || ""} ${e.name || ""} ${e.series || ""} ${v.variant_code || ""} ${v.spec_text || ""}`.toLowerCase();
-      if (q && !hay.includes(q)) return;
-      const already = orderItems[v.id];
-      rows.push(`
-        <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;cursor:pointer" onclick="openOrderItemDialog('${v.id}','picker')">
-          ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:38px;height:38px;object-fit:cover;border-radius:6px">` : `<div style="width:38px;height:38px;border-radius:6px;background:var(--bg2)"></div>`}
-          <div style="flex:1;min-width:0">
-            <div><b>${esc(e.name || "—")}</b> <span class="small" style="color:var(--muted)">${esc(v.variant_code || "")}</span></div>
-            <div class="small" style="color:var(--muted)">${esc(e.series || "")}${v.spec_text ? " · " + esc(v.spec_text) : ""}</div>
-          </div>
-          <div class="small">${v.cost_price != null ? "$" + esc(String(v.cost_price)) : "—"}</div>
-          ${already ? `<span class="badge mid">En pedido: ${already.qty}</span>` : ""}
-        </div>`);
-    });
-  });
-  list.innerHTML = rows.join("") || '<div class="empty">Sin resultados.</div>';
-}
-
-// --- Cantidad + nota dialog, shared by the picker and the eyewear detail view ---
-function openOrderItemDialog(variantId, from) {
+function refreshOrderUI(variantId) {
   const v = variantById(variantId);
-  if (!v) return;
-  orderItemDialogCtx = { variantId, from };
-  const existing = orderItems[variantId];
-  $("#modal-order-item-body").innerHTML = `
-    <button class="close" onclick="cancelOrderItemDialog()">×</button>
-    <h2>Agregar al pedido</h2>
-    <div class="row-meta" style="margin-bottom:10px">
-      ${v.image_url ? `<img src="${esc(v.image_url)}" style="width:44px;height:44px;object-fit:cover;border-radius:8px">` : ""}
-      <div><b>${esc(v._model.name || "—")}</b><div class="small" style="color:var(--muted)">${esc(v.variant_code || "")}${v.spec_text ? " · " + esc(v.spec_text) : ""}</div></div>
-    </div>
-    <div class="formgrid">
-      <div><label>Cantidad</label><input type="number" min="1" step="1" id="oi-qty" value="${existing ? existing.qty : 1}"></div>
-      <div><label>Nota (opcional)</label><input type="text" id="oi-note" value="${existing ? esc(existing.note || "") : ""}" placeholder="Ej. entrega urgente, color alterno, etc."></div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn primary" onclick="confirmOrderItem()">Aceptar</button>
-      <button class="btn" onclick="cancelOrderItemDialog()">Cancelar</button>
-    </div>`;
-  closeAllModals();
-  $("#modal-order-item").classList.add("show");
-}
-function confirmOrderItem() {
-  if (!orderItemDialogCtx) return;
-  const { variantId, from } = orderItemDialogCtx;
-  const qty = parseInt($("#oi-qty").value, 10) || 0;
-  if (qty <= 0) { toast("Indica una cantidad mayor a 0", true); return; }
-  const note = ($("#oi-note").value || "").trim();
-  orderItems[variantId] = { qty, note };
-  orderItemDialogCtx = null;
-  toast("Agregado al pedido ✓");
-  if (from === "detail") {
-    closeAllModals();
-  } else {
-    openOrderBuilder();
-  }
-}
-function cancelOrderItemDialog() {
-  const ctx = orderItemDialogCtx;
-  orderItemDialogCtx = null;
-  if (ctx && ctx.from === "detail") {
-    closeAllModals();
-  } else {
-    openOrderPicker();
-  }
+  const it = orderItems[variantId];
+  const qty = it ? (it.qty || 0) : 0;
+  const cell = document.querySelector(`.ob-subtotal[data-variant="${variantId}"]`);
+  if (cell && v) cell.textContent = money(qty * (v.cost_price || 0));
+  const status = document.getElementById(`oi-status-${variantId}`);
+  if (status) status.textContent = qty > 0 ? `En el pedido: ${qty}` : "";
+  updateOrderTotal();
 }
 
 function exportOrderXLS() {
